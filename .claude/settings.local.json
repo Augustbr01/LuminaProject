@@ -11,7 +11,9 @@
       "Bash(npm run *)",
       "Bash(npx jest *)",
       "Bash(npm uninstall *)",
-      "Bash(node -e \"const p = require\\('./node_modules/jest/package.json'\\); console.log\\(p.version\\)\")"
+      "Bash(node -e \"const p = require\\('./node_modules/jest/package.json'\\); console.log\\(p.version\\)\")",
+      "Bash(npm test *)",
+      "Bash(node node_modules/.bin/jest --forceExit)"
     ]
   }
 }
