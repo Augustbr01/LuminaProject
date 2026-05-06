@@ -62,8 +62,9 @@ compartilha.
   chamar a IA — exibe mensagem clara ao usuário.
 - O PDF é processado em memória e descartado após
   a extração. Não é salvo no servidor.
-- Status de processamento exibido na tela:
-  processando → ok | erro.
+- Indicador de progresso (loading) exibido durante
+  o upload; ao final, sucesso ou erro. Estado
+  transitório do mobile — não persistido no banco.
 
 ### Categorização por IA
 

@@ -344,7 +344,7 @@ transação de banco.
   resolvido em S6). Chamar `iaService.extractTransactions(...)`
   com esse buffer
 - Persistência em `prisma.$transaction([...])`:
-  cria `Extrato` com `status = OK` + `Transaction[]` em massa
+  cria `Extrato` + `Transaction[]` em massa
 - Mapeamento: cada item retornado pela IA vira uma
   `Transaction`. `reviewed = false`. `confidence` salvo
   como decimal
@@ -373,7 +373,6 @@ transação de banco.
 
 - Upload válido → 201, extrato + transações no banco
 - PDF não persistiu em disco nem no banco
-- Status final do extrato é `OK`
 
 **Critério de aceite:**
 
@@ -691,6 +690,10 @@ a API.
 - Logger Nest configurado (sem dados sensíveis em logs —
   nada de tokens, payloads de extrato, conteúdo de PDF)
 - `GET /health` (`@Public()`) para o Render
+- Plano de índices conforme `architecture.md` (seção
+  "Estratégia de Índices"). Validar com `EXPLAIN` em
+  amostra real antes de criar — não adicionar
+  profilaticamente
 
 **Testes:**
 

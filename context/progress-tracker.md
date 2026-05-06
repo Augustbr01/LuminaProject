@@ -8,7 +8,7 @@ the implementation currently stands.
 
 ## ▶ Current Session
 
-**S3 — ClerkAuthGuard + decorators**
+**S4 — User sync endpoint**
 
 > Read the full definition of this session in
 > `context/backend-development-plan.md` before starting.
@@ -22,7 +22,7 @@ the implementation currently stands.
 | S0  | Setup do projeto NestJS                  | ✅ Completed   |
 | S1  | Prisma + PostgreSQL (NeonDB)             | ✅ Completed   |
 | S2  | Configuração de testes (Jest)            | ✅ Completed   |
-| S3  | ClerkAuthGuard + decorators              | ⬜ Not started |
+| S3  | ClerkAuthGuard + decorators              | ✅ Completed   |
 | S4  | User sync endpoint                       | ⬜ Not started |
 | S5  | IaService (isolado)                      | ⬜ Not started |
 | S6  | POST /extratos: regra (sem IA)           | ⬜ Not started |
@@ -42,6 +42,36 @@ Legend: ✅ Completed · 🔄 In progress · ⬜ Not started · ⬛ Blocked
 ---
 
 ## Open Questions
+
+### OQ-2 (Bloco 3 — IA / Bloco 6 — Dashboard) ✅ Resolvida em 2026-05-06
+
+**Convenção de sinal de `Transaction.amount`.**
+
+✅ **Escolhido: B — Unsigned + tipo**
+
+Rationale: Schema explícito (`amount` sempre positivo + `type: 'debit' | 'credit'`) 
+elimina ambiguidade nas agregações, reduz bugs em cálculos (Dashboard, Goals),
+e suporta futura adição de créditos (salários, transferências) sem mudanças 
+na convenção.
+
+**Impacta:** prompt da IA (S5), schema da `Transaction`
+(potencial migration), Dashboard (S11), filtros do
+TransactionsService (S9), cálculo de progresso de Goals
+(S14 — investimento é débito).
+
+### OQ-3 (Bloco 6 — Dashboard) ✅ Resolvida em 2026-05-06
+
+**Filtro por banco em `GET /dashboard/summary`.**
+
+✅ **Escolhido: A — Endpoint aceita `?banco=`**
+
+O endpoint suporta query param opcional `?banco=nomeDoBanco` para filtro 
+server-side. Resposta varia conforme query, retornando apenas dados do 
+banco selecionado. Permite UX com seletor de banco no mobile sem overhead 
+de dados.
+
+**Impacta:** `DashboardService.summary` (S11), DTO da resposta com query param,
+telas correspondentes do mobile.
 
 ### OQ-1 (Bloco 7 — Metas) ✅ Resolvida em 2026-05-05
 
@@ -65,6 +95,50 @@ Legend: ✅ Completed · 🔄 In progress · ⬜ Not started · ⬛ Blocked
 
 Use this section to record decisions made during each session.
 Add a new entry when closing a session.
+
+### Pós-S3 — Correções de modelagem (revisão de schema)
+**Closed:** 2026-05-06
+**Decisions:**
+- Removidos `Extrato.status` e enum `ExtratoStatus`. Eram estado
+  morto: fluxo é síncrono (S7), nunca grava `PROCESSING`/`ERROR`.
+  Se assíncrono entrar no escopo no futuro, o enum pode ser
+  reintroduzido com os valores apropriados ao novo fluxo.
+- Adicionado `Transaction.updatedAt` (`@updatedAt`) — necessário
+  para auditoria das revisões manuais (S10) e debug.
+- CHECK constraints adicionadas via raw SQL na migration:
+  `Transaction.confidence ∈ [0, 1]` e `Goal.targetAmount > 0`.
+  Defesa em profundidade contra DTO bypass.
+- Documentado em `architecture.md`: convenção do prompt da IA
+  para classificar transferências para conta investimento como
+  `investimento` (crítico para Goals), seção de constraints SQL,
+  e plano de índices para S15.
+- `project-overview.md`: substituído "Status de processamento
+  exibido na tela: processando → ok | erro" por descrição de
+  loading transiente (não persistido).
+- `code-standards.md`: removida menção a `ExtratoStatus` na
+  regra de enums.
+- `backend-development-plan.md`: removidas referências a
+  `status = OK` em S7. Adicionado plano de índices em S15
+  apontando para `architecture.md`.
+- Migration aplicada no NeonDB:
+  `20260506160646_post_review_adjustments`.
+- Levantadas duas open questions bloqueantes (OQ-2 e OQ-3) que
+  precisam ser resolvidas antes de S5 e S11 respectivamente.
+**Deviations from plan:** N/A — correções pós-revisão; o plano
+foi ajustado para refletir a nova realidade do schema.
+
+### S3 — ClerkAuthGuard + decorators
+**Closed:** 2026-05-06
+**Decisions:**
+- `@clerk/clerk-sdk-node` instalado (v4.x, re-exports `@clerk/backend`).
+- `verifyToken` requer `issuer` obrigatório na assinatura desta versão; passado `null` para pular validação de issuer (secretKey é suficiente para verificação).
+- Guard registrado como `APP_GUARD` global em `AppModule` — toda rota é protegida por padrão.
+- `@Public()` usa `SetMetadata(IS_PUBLIC_KEY, true)`; guard lê com `reflector.getAllAndOverride` verificando handler e class.
+- `@CurrentUser()` retorna `{ clerkId: string }` lido de `request.user` (populado pelo guard).
+- `RequestWithUser` em `src/common/types/request-with-user.type.ts`.
+- 6 testes unitários cobrindo: @Public() bypass, token ausente, scheme errado, token inválido/expirado, token válido (user populado), verificação do IS_PUBLIC_KEY.
+- Guard: 100% statements/lines, 91.66% branches (≥90% exigido). Global: ≥70% em todas as métricas.
+**Deviations from plan:** `issuer: null` necessário pela assinatura da versão instalada do SDK.
 
 ### S2 — Configuração de testes (Jest)
 **Closed:** 2026-05-05

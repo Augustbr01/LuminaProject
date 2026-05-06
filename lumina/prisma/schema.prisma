@@ -21,7 +21,6 @@ model Extrato {
   user         User          @relation(fields: [userId], references: [id])
   banco        String
   mesAno       String
-  status       ExtratoStatus @default(PROCESSING)
   createdAt    DateTime      @default(now())
   transactions Transaction[]
 
@@ -39,6 +38,7 @@ model Transaction {
   confidence  Decimal  @db.Decimal(3, 2)
   reviewed    Boolean  @default(false)
   createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model Goal {
@@ -49,12 +49,6 @@ model Goal {
   targetAmount Decimal  @db.Decimal(12, 2)
   deadline     DateTime
   createdAt    DateTime @default(now())
-}
-
-enum ExtratoStatus {
-  PROCESSING
-  OK
-  ERROR
 }
 
 enum Category {

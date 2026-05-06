@@ -22,13 +22,12 @@
 - Prefer `type` for shapes, `interface` for contracts
   that may be extended.
 - All async functions return explicit typed Promises.
-- Enums for fixed sets of values (`ExtratoStatus`,
-  `Category`). Both are Prisma enums — generated client
-  types are imported from `@prisma/client`. Never use raw
-  strings where an enum exists. The mobile app mirrors
-  these as TypeScript const enums in
-  `frontend/constants/categories.ts` to avoid coupling to
-  Prisma client on the device.
+- Enums for fixed sets of values (`Category`). Prisma
+  enums — generated client types are imported from
+  `@prisma/client`. Never use raw strings where an enum
+  exists. The mobile app mirrors `Category` as a TypeScript
+  const enum in `frontend/constants/categories.ts` to
+  avoid coupling to Prisma client on the device.
 
 ## NestJS (Back-end)
 

@@ -108,7 +108,6 @@ model Extrato {
   user        User          @relation(fields: [userId], references: [id])
   banco       String
   mesAno      String        // formato: "2026-05"
-  status      ExtratoStatus @default(PROCESSING)
   createdAt   DateTime      @default(now())
   transactions Transaction[]
 
@@ -126,6 +125,7 @@ model Transaction {
   confidence  Decimal  @db.Decimal(3, 2)
   reviewed    Boolean  @default(false)
   createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model Goal {
@@ -136,12 +136,6 @@ model Goal {
   targetAmount Decimal @db.Decimal(12, 2)
   deadline    DateTime
   createdAt   DateTime @default(now())
-}
-
-enum ExtratoStatus {
-  PROCESSING
-  OK
-  ERROR
 }
 
 enum Category {
@@ -216,3 +210,51 @@ enum Category {
    campo opcional no multipart, usada exclusivamente para
    descriptografar o buffer em memória via `pdf-lib`, e
    descartada junto com o buffer após a extração.
+
+8. O banco impõe `Transaction.confidence ∈ [0, 1]` e
+   `Goal.targetAmount > 0` via CHECK constraints. A
+   validação no service/Zod é camada de UX; o CHECK é a
+   última linha de defesa e a fonte de verdade.
+
+## Database Constraints (não declaráveis no schema.prisma)
+
+Aplicadas via raw SQL na migration
+`20260506160646_post_review_adjustments`:
+
+- `Transaction_confidence_check`: `confidence >= 0 AND confidence <= 1`
+- `Goal_targetAmount_positive_check`: `targetAmount > 0`
+
+Ao adicionar novas constraints SQL futuras, registrar nesta
+seção. Prisma não introspecta CHECKs, então este documento é
+a fonte de verdade.
+
+## IA — Convenções de Classificação
+
+O prompt em `src/ia/prompts/extract-transactions.prompt.ts`
+(implementado em S5) deve instruir a Claude a classificar
+**transferências para contas de investimento, poupança ou
+aplicação financeira como `investimento`**, mesmo quando a
+descrição é genérica (`TED`, `PIX`, `TRANSFERENCIA`). Isso é
+crítico para o cálculo de progresso de Metas — sem essa
+classificação, aportes reais ficam invisíveis para o módulo
+de Goals.
+
+Categorias e seus critérios canônicos ficam documentados no
+próprio arquivo de prompt. Esta nota fixa a regra estrutural:
+a categoria `investimento` representa qualquer movimentação
+de saída do usuário em direção a poupança/investimento, não
+apenas operações explicitamente rotuladas como tal.
+
+## Estratégia de Índices (planejada para S15)
+
+Prisma cria automaticamente índices em FKs (`Extrato.userId`,
+`Transaction.extratoId`, `Goal.userId`). Os índices abaixo
+não são automáticos e devem entrar como parte do hardening
+em S15, com base nos padrões de query reais:
+
+- `Transaction(date)` — ordenação por data desc em `GET /transactions`
+- `Transaction(extratoId, reviewed)` — filtro `onlyUnreviewed`
+- Composto `Extrato(userId, mesAno)` — agregações do Dashboard
+
+Não adicionar profilaticamente. Validar com `EXPLAIN` real
+após volume mínimo de dados antes de criar.
