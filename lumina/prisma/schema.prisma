@@ -1,0 +1,70 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String    @id @default(uuid())
+  clerkId   String    @unique
+  createdAt DateTime  @default(now())
+  extratos  Extrato[]
+  goals     Goal[]
+}
+
+model Extrato {
+  id           String        @id @default(uuid())
+  userId       String
+  user         User          @relation(fields: [userId], references: [id])
+  banco        String
+  mesAno       String
+  status       ExtratoStatus @default(PROCESSING)
+  createdAt    DateTime      @default(now())
+  transactions Transaction[]
+
+  @@unique([userId, banco, mesAno])
+}
+
+model Transaction {
+  id          String   @id @default(uuid())
+  extratoId   String
+  extrato     Extrato  @relation(fields: [extratoId], references: [id], onDelete: Cascade)
+  date        DateTime
+  description String
+  amount      Decimal  @db.Decimal(12, 2)
+  category    Category
+  confidence  Decimal  @db.Decimal(3, 2)
+  reviewed    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
+model Goal {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  name         String
+  targetAmount Decimal  @db.Decimal(12, 2)
+  deadline     DateTime
+  createdAt    DateTime @default(now())
+}
+
+enum ExtratoStatus {
+  PROCESSING
+  OK
+  ERROR
+}
+
+enum Category {
+  alimentacao
+  transporte
+  moradia
+  lazer
+  saude
+  assinaturas
+  compras
+  investimento
+  outro
+}
