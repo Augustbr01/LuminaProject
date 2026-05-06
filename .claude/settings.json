@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(npm uninstall *)",
+      "Bash(npm run *)",
+      "Bash(npm test *)",
+      "Bash(npx prisma *)",
+      "Bash(npx jest *)",
+      "Bash(node node_modules/.bin/jest --forceExit)",
+      "Bash(git checkout *)",
+      "Bash(git push *)",
+      "PowerShell(gh *)"
+    ]
+  }
+}
