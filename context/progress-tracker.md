@@ -8,7 +8,7 @@ the implementation currently stands.
 
 ## ▶ Current Session
 
-**S4 — User sync endpoint**
+**S5 — IaService (isolado)**
 
 > Read the full definition of this session in
 > `context/backend-development-plan.md` before starting.
@@ -23,7 +23,7 @@ the implementation currently stands.
 | S1  | Prisma + PostgreSQL (NeonDB)             | ✅ Completed   |
 | S2  | Configuração de testes (Jest)            | ✅ Completed   |
 | S3  | ClerkAuthGuard + decorators              | ✅ Completed   |
-| S4  | User sync endpoint                       | ⬜ Not started |
+| S4  | User sync endpoint                       | ✅ Completed   |
 | S5  | IaService (isolado)                      | ⬜ Not started |
 | S6  | POST /extratos: regra (sem IA)           | ⬜ Not started |
 | S7  | POST /extratos: IA + persistência        | ⬜ Not started |
@@ -95,6 +95,42 @@ telas correspondentes do mobile.
 
 Use this section to record decisions made during each session.
 Add a new entry when closing a session.
+
+### S4 — User sync endpoint
+**Closed:** 2026-05-07
+**Decisions:**
+- `UsersModule` criado com `UsersController` (apenas wiring HTTP) e
+  `UsersService` (regra de negócio). Módulo exporta `UsersService`
+  para reuso em features futuras (`Extratos`, `Goals`).
+- `POST /users/sync` lê `clerkId` do JWT via `@CurrentUser()` — nunca
+  do corpo. Service retorna `{ user, created }`; controller usa
+  `@Res({ passthrough: true })` para diferenciar 201 (criado) de
+  200 (já existia). É a única forma limpa de preservar idempotência
+  com semântica HTTP correta sem expor o flag no payload.
+- `sync()` faz `findUnique` + `create` em vez de `upsert`: precisamos
+  do indicador `created` para o status code, e `select` explícito
+  evita campos extras no payload.
+- Helper `resolveUserId(clerkId)` lança `NotFoundException` (404)
+  quando o usuário não existe — será reutilizado em todos os módulos
+  que precisem resolver `userId` interno a partir do JWT (Extratos,
+  Transactions, Goals).
+- DTO `UserDto` é `interface` (shape simples, não validado por
+  class-validator — endpoint não tem corpo). Vive em `users/dto/`
+  por convenção do `code-standards.md`.
+- 5 testes unitários do service (criação, idempotência, resolveUserId
+  ok/404) + 3 E2E (401 sem token, 201 primeira chamada, 200 idempotente).
+  Mock global de `@clerk/clerk-sdk-node.verifyToken` no E2E e
+  `PrismaService` sobrescrito via `overrideProvider`.
+- `jest.config.ts`: `collectCoverageFrom` ampliado para excluir
+  `*.controller.ts`, `dto/`, `types/`, `decorators/` — wiring puro
+  por convenção do `code-standards.md` ("Não testar controllers em
+  isolamento"). Cobertura permanece 100% statements/lines, 90% branches,
+  bem acima do threshold de 70%.
+- E2E: `import request from 'supertest'` (default export, não
+  namespace) + cast `app.getHttpServer() as App` para satisfazer
+  `@typescript-eslint/no-unsafe-argument`.
+**Deviations from plan:** Nenhuma. `jest.config.ts` ajustado para
+refletir a convenção já documentada em `code-standards.md`.
 
 ### Pós-S3 — Correções de modelagem (revisão de schema)
 **Closed:** 2026-05-06
