@@ -8,7 +8,7 @@ the implementation currently stands.
 
 ## ▶ Current Session
 
-**S5 — IaService (isolado)**
+**S6 — POST /extratos: regra (sem IA)**
 
 > Read the full definition of this session in
 > `context/backend-development-plan.md` before starting.
@@ -24,7 +24,7 @@ the implementation currently stands.
 | S2  | Configuração de testes (Jest)            | ✅ Completed   |
 | S3  | ClerkAuthGuard + decorators              | ✅ Completed   |
 | S4  | User sync endpoint                       | ✅ Completed   |
-| S5  | IaService (isolado)                      | ⬜ Not started |
+| S5  | IaService (isolado)                      | ✅ Completed   |
 | S6  | POST /extratos: regra (sem IA)           | ⬜ Not started |
 | S7  | POST /extratos: IA + persistência        | ⬜ Not started |
 | S8  | GET /extratos                            | ⬜ Not started |
@@ -95,6 +95,67 @@ telas correspondentes do mobile.
 
 Use this section to record decisions made during each session.
 Add a new entry when closing a session.
+
+### S5 — IaService (isolado)
+**Closed:** 2026-05-07
+**Decisions:**
+- `@anthropic-ai/sdk@0.95.1` e `zod@4.4.3` instalados.
+- `IaModule` provê o cliente `Anthropic` via `useFactory`,
+  exposto pelo token DI `ANTHROPIC_CLIENT` (string em
+  `ia.tokens.ts` — evita ciclo entre `ia.module.ts` e
+  `ia.service.ts`). `IaService` injeta o token via
+  `@Inject(ANTHROPIC_CLIENT)` — única forma de instanciar
+  o SDK em todo o back-end (invariante 4 do `architecture.md`).
+- `extractTransactions(pdfBuffer, banco, mesAno)`: PDF
+  enviado como bloco `document` nativo (`source.type =
+  'base64'`, `media_type = 'application/pdf'`); modelo
+  `claude-haiku-4-5` (alias da família — não pinado em
+  versão dated por enquanto, conforme `architecture.md`);
+  `max_tokens: 4096`.
+- Schema Zod em `types/extracted-transaction.schema.ts`
+  reflete a decisão da OQ-2 (unsigned + tipo): `amount:
+  z.number().positive()` + `type: z.enum(['debit',
+  'credit'])`. `category` usa `z.enum(Category)` com o
+  enum gerado pelo Prisma (`@prisma/client`) — evita
+  duplicar a lista de categorias entre Zod e schema do
+  banco. `confidence: z.number().min(0).max(1)`.
+  `date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)` (ISO).
+- O `Transaction.type` ainda **não** existe no
+  Prisma schema — entrará via migration em S7 quando a
+  persistência for ligada. S5 só define o tipo retornado
+  pela IA; o mapeamento para a entidade fica em S7.
+- Prompt em arquivo separado (`prompts/extract-transactions.prompt.ts`)
+  como função `buildExtractTransactionsPrompt(banco, mesAno)`
+  para suportar interpolação. Inclui regra crítica do
+  `architecture.md`: transferências para conta de
+  investimento/poupança classificadas como `investimento`
+  mesmo com descrição genérica (TED, PIX, TRANSFERENCIA).
+- Erros tipados em `types/ia-errors.ts`: `IaApiError`
+  (envolve falhas do SDK — 5xx, network) e `IaParseError`
+  (envolve JSON malformado, schema inválido, ausência de
+  text block). Ambos preservam o erro original em `cause`.
+- Parsing usa `safeParse` (não `parse`) para evitar
+  branch defensivo inalcançável após `catch (err) { if
+  (err instanceof ZodError) ... }` — o branch de "erro
+  inesperado dentro do parse" não é acionável e foi
+  removido conforme regra "no error handling for
+  scenarios that can't happen" do CLAUDE.md.
+- 14 testes unitários cobrindo: caminho feliz (com e sem
+  transações), shape correto da request enviada ao SDK
+  (modelo, document block base64, prompt com banco/mesAno),
+  IaParseError em 9 cenários (sem text block, JSON
+  inválido, campo faltando, confidence fora de [0,1],
+  category fora do enum, type fora de debit/credit,
+  amount negativo, date fora do formato), IaApiError
+  em 2 cenários (SDK rejeita + cause preservado).
+- `IaModule` registrado em `AppModule.imports`. Cobertura
+  global: 100% statements/lines/functions, 90% branches
+  — bem acima do threshold de 70% e atinge ≥90% exigido
+  para services com regra de negócio.
+**Deviations from plan:** Nenhuma. O plano dizia "constante
+exportada" para o prompt; entreguei como função exportada
+porque o prompt depende de `banco` e `mesAno` — uma
+constante string sem interpolação seria menos útil.
 
 ### S4 — User sync endpoint
 **Closed:** 2026-05-07
