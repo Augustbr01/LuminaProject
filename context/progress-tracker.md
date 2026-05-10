@@ -8,7 +8,7 @@ the implementation currently stands.
 
 ## ▶ Current Session
 
-**S6 — POST /extratos: regra (sem IA)**
+**S7 — POST /extratos: IA + persistência**
 
 > Read the full definition of this session in
 > `context/backend-development-plan.md` before starting.
@@ -25,7 +25,7 @@ the implementation currently stands.
 | S3  | ClerkAuthGuard + decorators              | ✅ Completed   |
 | S4  | User sync endpoint                       | ✅ Completed   |
 | S5  | IaService (isolado)                      | ✅ Completed   |
-| S6  | POST /extratos: regra (sem IA)           | ⬜ Not started |
+| S6  | POST /extratos: regra (sem IA)           | ✅ Completed   |
 | S7  | POST /extratos: IA + persistência        | ⬜ Not started |
 | S8  | GET /extratos                            | ⬜ Not started |
 | S9  | GET /transactions                        | ⬜ Not started |
@@ -95,6 +95,83 @@ telas correspondentes do mobile.
 
 Use this section to record decisions made during each session.
 Add a new entry when closing a session.
+
+### S6 — POST /extratos: regra (sem IA)
+**Closed:** 2026-05-09
+**Decisions:**
+- **Trocada a lib de descriptografia: `pdf-lib` → `node-qpdf2`**
+  (wrapper sobre o binário `qpdf`). `pdf-lib` foi descartado
+  porque não suporta descriptografia (apenas detecção). Outras
+  alternativas avaliadas: `mupdf` (rejeitada — AGPL-3.0 obriga
+  abrir o back-end inteiro de Lumina via cláusula de uso em
+  rede), `pdfjs-dist` (rejeitada — só leitura, sem re-export
+  do buffer descriptografado), `qpdf-wasm` (não existe como
+  pacote npm). `architecture.md` e `backend-development-plan.md`
+  atualizados.
+- `qpdf` é dependência de runtime: precisa estar no PATH em
+  dev (Windows: `winget install qpdf.qpdf` + adicionar
+  `C:\Program Files\qpdf <ver>\bin` ao PATH) e em produção
+  (Render: prefixar build command com `apt-get install -y qpdf`).
+- `node-qpdf2` aceita apenas file path como input — buffer
+  é gravado em diretório transiente via `mkdtemp(os.tmpdir())`
+  e removido em `finally`. Invariante 1 do `architecture.md`
+  reescrita: "PDF nunca é persistido em storage durável" —
+  arquivo transiente em tmpfs é permitido durante decrypt.
+- `PdfDecryptionService.ensureDecrypted(buffer, password?)`:
+  uma única chamada a `qpdf --decrypt` (qpdf é content-preserving
+  e funciona como passthrough para PDFs não criptografados).
+  Distinção PDF_ENCRYPTED vs WRONG_PASSWORD baseada na presença
+  do parâmetro `password`, não no parser do stderr do qpdf
+  (frágil entre versões). Erros tipados: `PdfEncryptedError`,
+  `PdfWrongPasswordError`, ambos preservam o stderr original
+  em `cause`.
+- `node-qpdf2` é ESM-only (`"type": "module"`). Carregado via
+  dynamic `await import('node-qpdf2')` para compatibilidade
+  com o build CJS do projeto (e com ts-jest). Mockado em testes
+  com `jest.mock('node-qpdf2', () => ({ __esModule: true, ... }))`.
+- `ExtratosService.import()`: ordem de validação é
+  decrypt → resolveUserId → findUnique. Decrypt antes do banco
+  para satisfazer o critério "sem bater no banco com PDF
+  inválido". Composite key Prisma: `userId_banco_mesAno`.
+  Caminho feliz lança `NotImplementedException` (501) —
+  IA + persistência ficam para S7.
+- `UnprocessableEntityException` recebe payload `{ code, message }`
+  diretamente; o filter padrão do Nest preserva o `code` no
+  body. Códigos centralizados em `extratos/types/extrato-errors.ts`
+  (`EXTRATO_ERROR_CODES`) para o front consumir.
+- Controller: `FileInterceptor('file')` + `ParseFilePipe` com
+  `MaxFileSizeValidator` (10MB) e `FileTypeValidator` com
+  `fallbackToMimetype: true` — necessário porque a versão
+  11.x do `FileTypeValidator` carrega `file-type` via ESM
+  dinâmico que falha em Jest (CJS). Fallback usa o mimetype
+  do multipart, que é o que o spec exige ("mimetype application/pdf").
+- `Express.Multer.File` não existe (`@types/multer` não está
+  instalado e multer 2.x não exporta types próprios). Tipado
+  localmente como `interface UploadedPdf { buffer, mimetype,
+  size, originalname }` no controller — só os campos que
+  consumimos.
+- `ValidationPipe({ transform: true })` adicionado globalmente
+  em `main.ts` e replicado no setup do E2E (`createNestApplication`
+  não roda `main.ts`). S15 vai endurecer com `whitelist` e
+  `forbidNonWhitelisted`.
+- `ExtratosModule` importa `UsersModule` para reusar
+  `resolveUserId`. `UsersModule` já exporta `UsersService`.
+- 14 testes adicionados: 6 unit do `PdfDecryptionService`
+  (sucesso, PDF_ENCRYPTED, WRONG_PASSWORD, cause preservado,
+  rethrow de erros não-password, cleanup do tmp dir),
+  6 unit do `ExtratosService` (3 cenários de encryption,
+  duplicado, happy path 501, rethrow de erro inesperado),
+  8 E2E (401, 400 sem arquivo, 400 não-PDF, 400 mesAno
+  inválido, 422 PDF_ENCRYPTED, 422 WRONG_PASSWORD, 409,
+  501 happy). Total geral: 39 unit (6 suites) + 11 E2E.
+  Cobertura: 100% statements/lines/functions, 89% branches
+  global. Em `extratos.service.ts` branches caem para 83% por
+  artefato do istanbul instrumentando parameter-properties +
+  decorators — toda lógica real (3 `instanceof`, 1 `if (existing)`)
+  está coberta.
+**Deviations from plan:** Trocada a lib de descriptografia
+(pdf-lib → node-qpdf2) por incapacidade técnica do pdf-lib —
+arquitetura, plano e invariante 1 atualizados para refletir.
 
 ### S5 — IaService (isolado)
 **Closed:** 2026-05-07

@@ -269,7 +269,9 @@ isolar a regra de negócio e cobrir todos os caminhos de erro.
 **Entregáveis:**
 
 - `ExtratosModule`, `ExtratosController`, `ExtratosService`
-- `pdf-lib` instalado (`npm i pdf-lib`)
+- `node-qpdf2` instalado (`npm i node-qpdf2`) — wrapper
+  do binário `qpdf` (precisa estar no `PATH` em dev e em
+  produção; ver `architecture.md`/Deployment)
 - `POST /extratos` com `@UseInterceptors(FileInterceptor('file'))`
 - DTO `ImportExtratoDto` (`class-validator`):
   - `banco`: string não vazia (`@IsString() @IsNotEmpty()`).
@@ -281,7 +283,7 @@ isolar a regra de negócio e cobrir todos os caminhos de erro.
     valor é tentado como senha de descriptografia)
 - Validação de arquivo: mimetype `application/pdf`,
   tamanho máximo configurável (sugestão: 10MB)
-- Validação de criptografia via `pdf-lib` (obrigatória
+- Validação/descriptografia via `node-qpdf2` (obrigatória
   antes da query ao banco):
   - PDF criptografado sem `password` →
     `UnprocessableEntityException` com `{ code: 'PDF_ENCRYPTED' }`
@@ -322,6 +324,10 @@ isolar a regra de negócio e cobrir todos os caminhos de erro.
 - Nenhuma chamada à `IaService` nesta sessão
 - A checagem de criptografia ocorre **antes** da query de
   duplicidade — sem bater no banco com PDF inválido
+- O wrapper de `qpdf` cria diretório transiente em
+  `os.tmpdir()` e remove em `finally` — invariante 1 do
+  `architecture.md` continua válida (sem persistência
+  durável de PDF)
 
 **Dependências:** S1, S3, S4.
 

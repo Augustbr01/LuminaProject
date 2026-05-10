@@ -54,11 +54,14 @@ LuminaProject/
 - `lumina/src/extratos/` — Recebe o PDF via multipart.
   Executa validações na seguinte ordem:
   1. MIME type e tamanho do arquivo (400 se inválido).
-  2. Detecção de criptografia via `pdf-lib` — se o PDF
-     estiver criptografado e nenhuma senha for fornecida,
-     retorna 422 com código `PDF_ENCRYPTED`. Se a senha
-     estiver errada, retorna 422 com código `WRONG_PASSWORD`.
-     A descriptografia ocorre em memória.
+  2. Descriptografia via `node-qpdf2` (wrapper sobre o
+     binário `qpdf`) — se o PDF estiver criptografado e
+     nenhuma senha for fornecida, retorna 422 com código
+     `PDF_ENCRYPTED`. Se a senha estiver errada, retorna
+     422 com código `WRONG_PASSWORD`. O buffer é gravado
+     em arquivo transiente em `os.tmpdir()` (tmpfs no
+     Render), processado por `qpdf`, e o diretório é
+     removido em `finally` — não há persistência durável.
   3. Regra de negócio: 1 extrato por banco por mês (409
      se duplicado). Só então chama IaService.
   Persiste o resultado via Prisma.
@@ -87,9 +90,14 @@ LuminaProject/
 - **PostgreSQL**: fonte de verdade de todos os dados —
   usuários (clerk_id), extratos, transactions, goals.
 
-- **Sem armazenamento de PDF**: o arquivo é recebido como
-  buffer em memória, enviado à IA e descartado imediatamente.
-  Apenas o resultado (transações em JSON) é persistido.
+- **Sem armazenamento durável de PDF**: o arquivo é
+  recebido como buffer em memória e enviado à IA. Quando
+  o PDF é criptografado, um arquivo transiente é criado
+  em `os.tmpdir()` exclusivamente para o `qpdf` ler e
+  decriptar; o diretório é removido em `finally` antes da
+  request retornar. Nenhum PDF chega ao banco, ao S3 ou a
+  qualquer storage durável. Apenas o resultado (transações
+  em JSON) é persistido.
 
 ## Prisma Schema (modelo de dados)
 
@@ -168,7 +176,9 @@ enum Category {
 ## Deployment
 
 - **Back-end**: Render Web Service (Node.js).
-  Build command: `npm run build`
+  Build command: `apt-get update && apt-get install -y qpdf && npm run build`
+  (o binário `qpdf` é dependência runtime do
+  `PdfDecryptionService` e precisa estar no PATH)
   Start command: `node dist/main`
 - **Banco**: NeonDB (PostgreSQL serverless).
   A DATABASE_URL é injetada como variável de ambiente.
@@ -182,8 +192,11 @@ enum Category {
 
 ## Invariants
 
-1. O PDF nunca é salvo em disco ou banco de dados.
-   É processado em memória e descartado após a extração.
+1. O PDF nunca é persistido em storage durável (banco,
+   S3, disco persistente). Quando o PDF é criptografado,
+   um arquivo transiente em `os.tmpdir()` é criado
+   exclusivamente para o `qpdf` decriptar; o diretório é
+   removido em `finally` antes de a request terminar.
 
 2. A Claude API só é chamada após todas as validações
    de arquivo e regra de negócio passarem. A ordem é
@@ -207,9 +220,10 @@ enum Category {
    é camada adicional de UX, não substituto.
 
 7. A senha de PDF nunca é persistida. É recebida como
-   campo opcional no multipart, usada exclusivamente para
-   descriptografar o buffer em memória via `pdf-lib`, e
-   descartada junto com o buffer após a extração.
+   campo opcional no multipart, repassada ao `qpdf` via
+   `node-qpdf2` exclusivamente para descriptografar o
+   PDF transiente, e descartada junto com o buffer após
+   a extração. Não vai para logs nem para o banco.
 
 8. O banco impõe `Transaction.confidence ∈ [0, 1]` e
    `Goal.targetAmount > 0` via CHECK constraints. A

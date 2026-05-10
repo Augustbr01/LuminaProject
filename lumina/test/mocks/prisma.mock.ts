@@ -16,8 +16,10 @@ interface MockModel {
   groupBy: MockFn;
 }
 
-export interface PrismaMock
-  extends Pick<PrismaService, '$connect' | '$disconnect'> {
+export interface PrismaMock extends Pick<
+  PrismaService,
+  '$connect' | '$disconnect'
+> {
   user: MockModel;
   extrato: MockModel;
   transaction: MockModel;
