@@ -6,6 +6,7 @@ import { IaModule } from './ia/ia.module';
 import { UsersModule } from './users/users.module';
 import { ExtratosModule } from './extratos/extratos.module';
 import { TransactionsModule } from './transactions/transactions.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { TransactionsModule } from './transactions/transactions.module';
     IaModule,
     ExtratosModule,
     TransactionsModule,
+    DashboardModule,
   ],
   controllers: [],
   providers: [

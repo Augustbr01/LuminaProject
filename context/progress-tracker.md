@@ -8,7 +8,7 @@ the implementation currently stands.
 
 ## ▶ Current Session
 
-**S11 — GET /dashboard/summary**
+**S12 — GET /dashboard/history**
 
 > Read the full definition of this session in
 > `context/backend-development-plan.md` before starting.
@@ -30,7 +30,7 @@ the implementation currently stands.
 | S8  | GET /extratos                            | ✅ Completed   |
 | S9  | GET /transactions                        | ✅ Completed   |
 | S10 | PATCH /transactions/:id                  | ✅ Completed   |
-| S11 | GET /dashboard/summary                   | ⬜ Not started |
+| S11 | GET /dashboard/summary                   | ✅ Completed   |
 | S12 | GET /dashboard/history                   | ⬜ Not started |
 | S13 | POST/GET /goals (sem progresso)          | ⬜ Not started |
 | S14 | Cálculo de progresso e previsão          | ⬜ Not started |
@@ -95,6 +95,93 @@ telas correspondentes do mobile.
 
 Use this section to record decisions made during each session.
 Add a new entry when closing a session.
+
+### S11 — GET /dashboard/summary
+**Closed:** 2026-05-10
+**Decisions:**
+- Novo módulo `dashboard/` (controller, service, module, DTO) —
+  fronteira própria conforme `code-standards.md`. Módulo importa
+  apenas `UsersModule` (para `resolveUserId`); `PrismaService`
+  vem do `PrismaModule` global. Registrado em `AppModule`.
+- DTO `DashboardSummaryQueryDto` aceita `mesAno` opcional
+  (mesmo regex `^\d{4}-(0[1-9]|1[0-2])$` dos outros módulos)
+  e `banco` opcional (string não vazia) — implementa a
+  decisão da **OQ-3** (filtro por banco como query param,
+  resolvido server-side).
+- `DashboardService.summary(clerkId, query)` faz **duas**
+  chamadas ao Prisma e nada mais — invariante 1 do
+  `architecture.md` (módulo só lê e agrega) preservada:
+  1. `prisma.transaction.groupBy({ by: ['category'], ... })`
+     somando `amount` por categoria no `mesAno` requisitado.
+  2. `prisma.transaction.aggregate({ _sum: { amount } })`
+     calculando o total do `previousMesAno` para `variacaoVsMesAnterior`.
+  Ambas filtram `type: TransactionType.debit` (gastos = débitos,
+  conforme OQ-2 — unsigned + tipo) e usam `extrato.userId`
+  resolvido via `usersService.resolveUserId(clerkId)` — `userId`
+  **nunca** vem do request (invariante 3).
+- `mesAno` default = mês atual (UTC) quando o query param não
+  é informado, conforme o plano (`default: mês atual`).
+- `previousMesAno()` helper privado lida com a virada de ano:
+  janeiro → dezembro do ano anterior (`2026-01` → `2025-12`).
+- `buildPieChart()` aplica algoritmo de compensação de
+  arredondamento: percentuais individuais arredondados a 2
+  casas, e o **diff** (100 − soma) é distribuído na categoria
+  com maior `valor`. Garante critério "soma de
+  `pieChart[].percentual` ∈ [99.99, 100.01]" mesmo com 7+
+  categorias iguais (que sem compensação dariam 100.03).
+  Testado com 7 categorias de R$ 100 cada — soma fica
+  exatamente em 100.00.
+- `categoriaMaior` = `reduce` pelo maior `valor`. Quando não
+  há nenhuma categoria com `valor > 0`, retorna `null`
+  (não vazia um objeto inválido).
+- `variacaoVsMesAnterior` calculado como
+  `((atual − anterior) / anterior) × 100`, arredondado a 2
+  casas. Retorna `null` quando `previousTotal === 0` —
+  evita divisão por zero, conforme critério explícito do plano.
+  Suporta positivo (+20%), negativo (−20%) e zero.
+- Decimal do Prisma é convertido via `Number()` (funciona tanto
+  com `Decimal` real quanto com string nos mocks). Valor
+  arredondado a 2 casas no momento da leitura — preserva
+  precisão BRL sem propagar artefatos de float.
+- Controller devolve `{ data: DashboardSummary }` no envelope
+  padrão do `code-standards.md` (mesmo formato dos outros
+  endpoints).
+- **Mock global do Prisma** ampliado com `aggregate` (método
+  real do Prisma Client, vai ser reusado em S14 pelo cálculo
+  de Goals). Mudança puramente aditiva — nenhum teste
+  existente precisou ser ajustado.
+- 13 testes unitários novos no `DashboardService.summary`:
+  mês sem dados → zeros/null; ownership (userId nunca do
+  request); filtro `type=debit` + `mesAno` no groupBy e
+  previousMesAno no aggregate; filtro `banco` em ambas as
+  queries; virada de ano (jan → dez do ano anterior); default
+  para mês atual; 1 categoria → 100%; muitas categorias →
+  soma em [99.99, 100.01]; `categoriaMaior` quando não é a
+  primeira no array; variação positiva (+20%), negativa
+  (−20%), zero; previous sem dados → variação null
+  (sem divisão por zero); propagação de `NotFoundException`
+  de `resolveUserId`.
+- 6 testes E2E novos no `dashboard.e2e-spec.ts`: 401 sem
+  token; mês sem dados → zeros/null; happy path com 3
+  categorias (verifica `totalGasto`, `categoriaMaior`,
+  `variacaoVsMesAnterior=+25%` e soma de percentuais em
+  [99.99, 100.01]); **isolamento entre dois usuários** —
+  critério de aceite "Ownership aplicado em todas as queries"
+  — userA vê só seus dados, userB só os seus, e cada `groupBy`
+  e `aggregate` carrega o `userId` correto resolvido do
+  token; filtro `?banco=` repassado a ambas as queries
+  (OQ-3); 400 quando `mesAno` mal formado.
+- Totais: 78 unit (8 suites, +13) + 34 E2E (+6, 1 todo).
+  Cobertura: 100% statements/lines/functions, 89.43%
+  branches global. `dashboard.service.ts` em 88.23% branches
+  pelo artefato conhecido do istanbul instrumentando
+  parameter-properties + spreads condicionais — toda lógica
+  real (default mesAno, virada de ano, banco filter, diff
+  ≠ 0, totalGasto > 0, previousTotal > 0, categoriaMaior
+  null) está coberta.
+- Lint dos arquivos novos limpo (zero erros novos).
+  `npm run build` passa sem erros.
+**Deviations from plan:** Nenhuma.
 
 ### S10 — PATCH /transactions/:id (revisão)
 **Closed:** 2026-05-10
