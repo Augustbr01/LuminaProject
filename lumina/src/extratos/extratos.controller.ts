@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   FileTypeValidator,
+  HttpCode,
+  HttpStatus,
   MaxFileSizeValidator,
   ParseFilePipe,
   Post,
@@ -11,7 +13,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ImportExtratoDto } from './dto/import-extrato.dto';
-import { ExtratosService } from './extratos.service';
+import { ExtratosService, ImportExtratoResult } from './extratos.service';
 
 const MAX_PDF_SIZE_BYTES = 10 * 1024 * 1024;
 
@@ -27,6 +29,7 @@ export class ExtratosController {
   constructor(private readonly extratosService: ExtratosService) {}
 
   @Post()
+  @HttpCode(HttpStatus.CREATED)
   @UseInterceptors(FileInterceptor('file'))
   async import(
     @UploadedFile(
@@ -43,7 +46,12 @@ export class ExtratosController {
     file: UploadedPdf,
     @Body() dto: ImportExtratoDto,
     @CurrentUser() currentUser: { clerkId: string },
-  ): Promise<never> {
-    return this.extratosService.import(currentUser.clerkId, dto, file.buffer);
+  ): Promise<{ data: ImportExtratoResult }> {
+    const result = await this.extratosService.import(
+      currentUser.clerkId,
+      dto,
+      file.buffer,
+    );
+    return { data: result };
   }
 }

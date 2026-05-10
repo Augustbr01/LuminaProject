@@ -8,7 +8,7 @@ the implementation currently stands.
 
 ## ▶ Current Session
 
-**S7 — POST /extratos: IA + persistência**
+**S8 — GET /extratos**
 
 > Read the full definition of this session in
 > `context/backend-development-plan.md` before starting.
@@ -26,7 +26,7 @@ the implementation currently stands.
 | S4  | User sync endpoint                       | ✅ Completed   |
 | S5  | IaService (isolado)                      | ✅ Completed   |
 | S6  | POST /extratos: regra (sem IA)           | ✅ Completed   |
-| S7  | POST /extratos: IA + persistência        | ⬜ Not started |
+| S7  | POST /extratos: IA + persistência        | ✅ Completed   |
 | S8  | GET /extratos                            | ⬜ Not started |
 | S9  | GET /transactions                        | ⬜ Not started |
 | S10 | PATCH /transactions/:id                  | ⬜ Not started |
@@ -95,6 +95,85 @@ telas correspondentes do mobile.
 
 Use this section to record decisions made during each session.
 Add a new entry when closing a session.
+
+### S7 — POST /extratos: IA + persistência
+**Closed:** 2026-05-10
+**Decisions:**
+- Migration `20260510223029_add_transaction_type` adiciona o
+  enum `TransactionType` (`debit | credit`) e a coluna
+  `Transaction.type` (NOT NULL). É a contrapartida no schema
+  da decisão da OQ-2 (unsigned + tipo) já refletida no Zod
+  da IA em S5. Aplicada no Neon sem warning porque a tabela
+  estava vazia (S6 sempre retornava 501). Como efeito
+  colateral, Prisma removeu o `DEFAULT CURRENT_TIMESTAMP` de
+  `Transaction.updatedAt` que tinha sido criado em pós-S3 só
+  para satisfazer o "tabela não vazia" da época — `@updatedAt`
+  é gerenciado pelo Prisma Client, não precisa do default no DB.
+- `ExtratosService` agora injeta `IaService`. Ordem real do
+  fluxo: decrypt → resolveUserId → findUnique (duplicidade) →
+  IA → persistência. Invariante 2 mantida: IA não é chamada se
+  duplicado.
+- Persistência usa `prisma.$transaction` no formato **callback**
+  (não array), porque precisamos do `extrato.id` recém-criado
+  para popular o `extratoId` das transações. Sequência dentro
+  do callback: `tx.extrato.create()` → `tx.transaction.createMany()`
+  (bulk) → `tx.transaction.findMany()` (para retornar os
+  registros criados, já que `createMany` só devolve `count`).
+  Tudo atômico. Critério "envolve as duas inserções" satisfeito.
+  Plano sugeria `[...]` (array form); deviation registrada
+  abaixo.
+- Quando a IA retorna `[]`, pula `createMany` e ainda cria o
+  Extrato vazio. Isso vale tanto para PDFs sem transações
+  identificáveis quanto para extratos antigos zerados — não há
+  motivo para 422 aqui (o PDF foi processado com sucesso).
+- Mapeamento de erros:
+  - `IaApiError` ou `IaParseError` → `BadGatewayException`
+    (502) com mensagem genérica para o front. Nada persistido,
+    pois a IA é chamada **antes** do `$transaction`.
+  - `Prisma.PrismaClientKnownRequestError` com código `P2002`
+    dentro do `$transaction` (race condition no
+    `@@unique([userId, banco, mesAno])`) → `ConflictException`
+    (409). Outros códigos Prisma são propagados para o filter
+    global cuidar.
+  - Erros desconhecidos da IA (não-Ia*) propagados como-é —
+    sinaliza bug em vez de mascarar como 502.
+- Resposta ajustada do que está no plano:
+  ```ts
+  { data: { extrato: { id, banco, mesAno, createdAt },
+            transactions: Transaction[] } }
+  ```
+  Removido o campo `status` que o plano mencionava — `Extrato.status`
+  foi removido em pós-S3 (estado morto do fluxo síncrono).
+  Adicionado `createdAt` no retorno (útil pro front ordenar).
+  Wrap em `{ data: ... }` segue a convenção do `code-standards.md`
+  (mesmo padrão do `/users/sync`).
+- Controller passou de `Promise<never>` para `Promise<{ data: ... }>`
+  e ganhou `@HttpCode(201)` explícito — Nest devolve 200 por
+  default em POST com retorno via Promise.
+- `ExtratosModule` importa `IaModule` (que exporta `IaService`).
+- 11 testes unitários do `ExtratosService` (3 cenários de
+  encryption, 1 duplicado, 4 happy path — chamada à IA,
+  shape do `$transaction`, retorno, IA retorno vazio — e 5
+  failure paths — IaApiError → 502, IaParseError → 502, erro
+  IA não tipado propagado, P2002 → 409, P2003 propagado).
+  4 testes E2E novos/atualizados (era 1 happy 501; virou
+  502 IA falhou, 201 happy com IA mockada e verificação
+  da Invariante 1 via JSON.stringify das chamadas de write).
+  Total geral: 46 unit (6 suites) + 12 E2E. Cobertura: 100%
+  statements/lines/functions, 89.85% branches global.
+- Test setup do `$transaction` no callback form:
+  `prisma.$transaction.mockImplementation((cb) => cb(txMock))`
+  onde `txMock = createPrismaMock()` — passa o mesmo padrão
+  de mock como `tx`. Permite assertar nos métodos do `tx` sem
+  duplicar a fixture.
+**Deviations from plan:**
+1. Resposta sem campo `status` (vestigial de pós-S3) e
+   adicionado `createdAt`. Documentado acima.
+2. `prisma.$transaction` em formato **callback** em vez de
+   array (`[...]`). Razão: `extratoId` só existe após o
+   primeiro insert, e callback evita pré-gerar UUIDs no
+   service. Atomicidade preservada — é o que o critério de
+   aceite exige.
 
 ### S6 — POST /extratos: regra (sem IA)
 **Closed:** 2026-05-09
