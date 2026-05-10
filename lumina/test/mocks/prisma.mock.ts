@@ -16,6 +16,7 @@ interface MockModel {
   deleteMany: MockFn;
   count: MockFn;
   groupBy: MockFn;
+  aggregate: MockFn;
 }
 
 export interface PrismaMock extends Pick<
@@ -45,6 +46,7 @@ const makeModel = (): MockModel => ({
   deleteMany: jest.fn(),
   count: jest.fn(),
   groupBy: jest.fn(),
+  aggregate: jest.fn(),
 });
 
 export const createPrismaMock = (): PrismaMock => ({
