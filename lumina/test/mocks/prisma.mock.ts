@@ -4,11 +4,13 @@ type MockFn = jest.Mock;
 
 interface MockModel {
   findUnique: MockFn;
+  findUniqueOrThrow: MockFn;
   findFirst: MockFn;
   findMany: MockFn;
   create: MockFn;
   createMany: MockFn;
   update: MockFn;
+  updateMany: MockFn;
   upsert: MockFn;
   delete: MockFn;
   deleteMany: MockFn;
@@ -31,11 +33,13 @@ export interface PrismaMock extends Pick<
 
 const makeModel = (): MockModel => ({
   findUnique: jest.fn(),
+  findUniqueOrThrow: jest.fn(),
   findFirst: jest.fn(),
   findMany: jest.fn(),
   create: jest.fn(),
   createMany: jest.fn(),
   update: jest.fn(),
+  updateMany: jest.fn(),
   upsert: jest.fn(),
   delete: jest.fn(),
   deleteMany: jest.fn(),

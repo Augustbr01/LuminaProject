@@ -8,7 +8,7 @@ the implementation currently stands.
 
 ## ▶ Current Session
 
-**S10 — PATCH /transactions/:id (revisão)**
+**S11 — GET /dashboard/summary**
 
 > Read the full definition of this session in
 > `context/backend-development-plan.md` before starting.
@@ -29,7 +29,7 @@ the implementation currently stands.
 | S7  | POST /extratos: IA + persistência        | ✅ Completed   |
 | S8  | GET /extratos                            | ✅ Completed   |
 | S9  | GET /transactions                        | ✅ Completed   |
-| S10 | PATCH /transactions/:id                  | ⬜ Not started |
+| S10 | PATCH /transactions/:id                  | ✅ Completed   |
 | S11 | GET /dashboard/summary                   | ⬜ Not started |
 | S12 | GET /dashboard/history                   | ⬜ Not started |
 | S13 | POST/GET /goals (sem progresso)          | ⬜ Not started |
@@ -95,6 +95,67 @@ telas correspondentes do mobile.
 
 Use this section to record decisions made during each session.
 Add a new entry when closing a session.
+
+### S10 — PATCH /transactions/:id (revisão)
+**Closed:** 2026-05-10
+**Decisions:**
+- Endpoint `PATCH /transactions/:id` adicionado ao
+  `TransactionsController` existente — mesmo módulo de S9,
+  fronteira coesa. DTO `UpdateTransactionDto` em
+  `transactions/dto/update-transaction.dto.ts` valida apenas
+  `category` via `@IsEnum(Category)` (enum gerado pelo Prisma,
+  importado de `@prisma/client` — evita duplicar a lista). DTO
+  exige `category` presente; corpo vazio falha no pipe e gera 400.
+- `TransactionsService.update(clerkId, id, dto)` resolve
+  `userId` via `UsersService.resolveUserId` (mesmo padrão dos
+  outros services) e faz um único `prisma.transaction.updateMany`
+  com `where: { id, extrato: { userId } }`. Operação atômica:
+  ownership + update no mesmo round-trip, sem TOCTOU entre
+  check e update. Se `count === 0` → `NotFoundException` (404).
+  Em seguida, `findUniqueOrThrow({ where: { id } })` retorna o
+  registro atualizado para o cliente (o `updateMany` só devolve
+  `count`).
+- Critério "404 não vazar existência" satisfeito: usuário B
+  tentando editar transação de A recebe 404 idêntico ao caso
+  de id inexistente — mesma resposta para ambos. Não há 403.
+- Critério "`reviewed = true` mesmo com categoria igual"
+  satisfeito por design: o `data` do `updateMany` sempre
+  envia `{ category, reviewed: true }` sem condicional —
+  Prisma escreve os dois campos. Teste unitário cobre o
+  cenário (categoria nova = categoria antiga).
+- Mock global do Prisma (`test/mocks/prisma.mock.ts`) ampliado
+  com `findUniqueOrThrow` e `updateMany` (ambos métodos reais
+  do Prisma Client; vão ser reutilizados em S11+ pelo Dashboard
+  e Goals). Mudança puramente aditiva — nenhum teste existente
+  precisou ser ajustado.
+- Controller retorna `{ data: Transaction }` no envelope padrão
+  do `code-standards.md` (mesmo formato de `GET /transactions`).
+  Sem `@HttpCode` — Nest devolve 200 por default em PATCH,
+  que é o esperado para revisão.
+- 5 testes unitários novos no `TransactionsService.update`:
+  happy path (updateMany scoped + findUniqueOrThrow + retorno),
+  count=0 → 404 (e não chama findUniqueOrThrow), categoria
+  igual ainda força `reviewed: true`, `userId` nunca vem do
+  request, propagação de `NotFoundException` de `resolveUserId`.
+  Os 8 testes de `list` (S9) foram agrupados em `describe('list')`
+  para conviver com `describe('update')` — sem alteração de
+  comportamento.
+- 5 testes E2E novos no `transactions.e2e-spec.ts`: 401 sem
+  token; happy 200 com ownership via `extrato.userId` e shape
+  da resposta; **404 quando userB edita transação de userA**
+  (critério de aceite); 400 para categoria fora do enum;
+  400 para body sem `category`. O `describe` raiz renomeado
+  de "GET /transactions" para "Transactions (e2e)" — engloba
+  agora GET e PATCH.
+- Totais: 64 unit (7 suites, +5) + 28 E2E (+5, 1 todo).
+  Cobertura: 100% statements/lines/functions, 89.88% branches
+  global. `transactions.service.ts` ficou em 87.5% branches
+  pelo mesmo artefato do istanbul instrumentando parameter-
+  properties — toda lógica real (1 condicional `count === 0`)
+  está coberta.
+- Lint dos arquivos novos limpo (zero erros novos).
+- `npm run build` passa sem erros.
+**Deviations from plan:** Nenhuma.
 
 ### S9 — GET /transactions
 **Closed:** 2026-05-10

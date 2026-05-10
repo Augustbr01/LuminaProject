@@ -13,7 +13,7 @@ jest.mock('@clerk/clerk-sdk-node', () => ({
     mockVerifyToken(...args),
 }));
 
-describe('Transactions (e2e) — GET /transactions', () => {
+describe('Transactions (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaMock;
 
@@ -91,6 +91,8 @@ describe('Transactions (e2e) — GET /transactions', () => {
     mockVerifyToken.mockReset();
     prisma.user.findUnique.mockReset();
     prisma.transaction.findMany.mockReset();
+    prisma.transaction.updateMany.mockReset();
+    prisma.transaction.findUniqueOrThrow.mockReset();
   });
 
   it('returns 401 when no Authorization header is sent', async () => {
@@ -241,5 +243,92 @@ describe('Transactions (e2e) — GET /transactions', () => {
       .expect(400);
 
     expect(prisma.transaction.findMany).not.toHaveBeenCalled();
+  });
+
+  describe('PATCH /transactions/:id', () => {
+    const transactionId = 'tx-a-1';
+    const updatedTx = {
+      ...userATxs[1],
+      category: 'transporte',
+      reviewed: true,
+      updatedAt: new Date('2026-05-10T12:00:00.000Z'),
+    };
+
+    it('returns 401 when no Authorization header is sent', async () => {
+      await request(app.getHttpServer() as App)
+        .patch(`/transactions/${transactionId}`)
+        .send({ category: 'transporte' })
+        .expect(401);
+      expect(prisma.transaction.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('updates category and sets reviewed=true, scoped to the user via extrato.userId', async () => {
+      mockVerifyToken.mockResolvedValue({ sub: clerkIdA });
+      prisma.user.findUnique.mockResolvedValue({ id: userIdA });
+      prisma.transaction.updateMany.mockResolvedValue({ count: 1 });
+      prisma.transaction.findUniqueOrThrow.mockResolvedValue(updatedTx);
+
+      const response = await request(app.getHttpServer() as App)
+        .patch(`/transactions/${transactionId}`)
+        .set('Authorization', 'Bearer token.user.a')
+        .send({ category: 'transporte' })
+        .expect(200);
+
+      expect(prisma.transaction.updateMany).toHaveBeenCalledWith({
+        where: { id: transactionId, extrato: { userId: userIdA } },
+        data: { category: 'transporte', reviewed: true },
+      });
+
+      const body = response.body as {
+        data: { id: string; category: string; reviewed: boolean };
+      };
+      expect(body.data.id).toBe(transactionId);
+      expect(body.data.category).toBe('transporte');
+      expect(body.data.reviewed).toBe(true);
+    });
+
+    it('returns 404 when user B tries to edit a transaction owned by user A (no existence leak)', async () => {
+      mockVerifyToken.mockResolvedValue({ sub: clerkIdB });
+      prisma.user.findUnique.mockResolvedValue({ id: userIdB });
+      prisma.transaction.updateMany.mockResolvedValue({ count: 0 });
+
+      await request(app.getHttpServer() as App)
+        .patch(`/transactions/${transactionId}`)
+        .set('Authorization', 'Bearer token.user.b')
+        .send({ category: 'transporte' })
+        .expect(404);
+
+      expect(prisma.transaction.updateMany).toHaveBeenCalledWith({
+        where: { id: transactionId, extrato: { userId: userIdB } },
+        data: { category: 'transporte', reviewed: true },
+      });
+      expect(prisma.transaction.findUniqueOrThrow).not.toHaveBeenCalled();
+    });
+
+    it('returns 400 when category is not in the allowed enum', async () => {
+      mockVerifyToken.mockResolvedValue({ sub: clerkIdA });
+      prisma.user.findUnique.mockResolvedValue({ id: userIdA });
+
+      await request(app.getHttpServer() as App)
+        .patch(`/transactions/${transactionId}`)
+        .set('Authorization', 'Bearer token.user.a')
+        .send({ category: 'comida' })
+        .expect(400);
+
+      expect(prisma.transaction.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('returns 400 when category is missing', async () => {
+      mockVerifyToken.mockResolvedValue({ sub: clerkIdA });
+      prisma.user.findUnique.mockResolvedValue({ id: userIdA });
+
+      await request(app.getHttpServer() as App)
+        .patch(`/transactions/${transactionId}`)
+        .set('Authorization', 'Bearer token.user.a')
+        .send({})
+        .expect(400);
+
+      expect(prisma.transaction.updateMany).not.toHaveBeenCalled();
+    });
   });
 });
