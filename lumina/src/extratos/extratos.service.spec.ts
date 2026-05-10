@@ -251,11 +251,7 @@ describe('ExtratosService', () => {
     });
 
     it('returns the persisted extrato + transactions', async () => {
-      const result = await service.import(
-        clerkId,
-        { ...validDto },
-        fileBuffer,
-      );
+      const result = await service.import(clerkId, { ...validDto }, fileBuffer);
 
       expect(result).toEqual({
         extrato: {
@@ -272,11 +268,7 @@ describe('ExtratosService', () => {
       iaService.extractTransactions.mockResolvedValue([]);
       txMock.transaction.findMany.mockResolvedValue([]);
 
-      const result = await service.import(
-        clerkId,
-        { ...validDto },
-        fileBuffer,
-      );
+      const result = await service.import(clerkId, { ...validDto }, fileBuffer);
 
       expect(txMock.transaction.createMany).not.toHaveBeenCalled();
       expect(txMock.extrato.create).toHaveBeenCalledTimes(1);
@@ -350,6 +342,80 @@ describe('ExtratosService', () => {
       await expect(
         service.import(clerkId, { ...validDto }, fileBuffer),
       ).rejects.toBe(otherError);
+    });
+  });
+
+  describe('list', () => {
+    const baseCreatedAt = new Date('2026-04-30T12:00:00.000Z');
+    const sampleExtratos = [
+      {
+        id: 'e-2',
+        banco: 'nubank',
+        mesAno: '2026-04',
+        createdAt: baseCreatedAt,
+      },
+      {
+        id: 'e-1',
+        banco: 'itau',
+        mesAno: '2026-03',
+        createdAt: new Date('2026-03-30T12:00:00.000Z'),
+      },
+    ];
+
+    beforeEach(() => {
+      usersService.resolveUserId.mockResolvedValue(userId);
+      prisma.extrato.findMany.mockResolvedValue(sampleExtratos);
+    });
+
+    it('queries only the authenticated user, ordered by createdAt desc, with safe fields only', async () => {
+      const result = await service.list(clerkId, {});
+
+      expect(usersService.resolveUserId).toHaveBeenCalledWith(clerkId);
+      expect(prisma.extrato.findMany).toHaveBeenCalledWith({
+        where: { userId },
+        select: { id: true, banco: true, mesAno: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      expect(result).toBe(sampleExtratos);
+    });
+
+    it('applies the mesAno filter when provided', async () => {
+      await service.list(clerkId, { mesAno: '2026-04' });
+
+      expect(prisma.extrato.findMany).toHaveBeenCalledWith({
+        where: { userId, mesAno: '2026-04' },
+        select: { id: true, banco: true, mesAno: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      });
+    });
+
+    it('applies the banco filter when provided', async () => {
+      await service.list(clerkId, { banco: 'nubank' });
+
+      expect(prisma.extrato.findMany).toHaveBeenCalledWith({
+        where: { userId, banco: 'nubank' },
+        select: { id: true, banco: true, mesAno: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      });
+    });
+
+    it('combines mesAno and banco filters when both are provided', async () => {
+      await service.list(clerkId, { mesAno: '2026-04', banco: 'nubank' });
+
+      expect(prisma.extrato.findMany).toHaveBeenCalledWith({
+        where: { userId, mesAno: '2026-04', banco: 'nubank' },
+        select: { id: true, banco: true, mesAno: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      });
+    });
+
+    it('propagates NotFoundException when the user does not exist', async () => {
+      const notFound = new Error('User not found');
+      usersService.resolveUserId.mockReset();
+      usersService.resolveUserId.mockRejectedValue(notFound);
+
+      await expect(service.list(clerkId, {})).rejects.toBe(notFound);
+      expect(prisma.extrato.findMany).not.toHaveBeenCalled();
     });
   });
 });

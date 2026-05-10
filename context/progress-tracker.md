@@ -8,7 +8,7 @@ the implementation currently stands.
 
 ## ▶ Current Session
 
-**S8 — GET /extratos**
+**S9 — GET /transactions**
 
 > Read the full definition of this session in
 > `context/backend-development-plan.md` before starting.
@@ -27,7 +27,7 @@ the implementation currently stands.
 | S5  | IaService (isolado)                      | ✅ Completed   |
 | S6  | POST /extratos: regra (sem IA)           | ✅ Completed   |
 | S7  | POST /extratos: IA + persistência        | ✅ Completed   |
-| S8  | GET /extratos                            | ⬜ Not started |
+| S8  | GET /extratos                            | ✅ Completed   |
 | S9  | GET /transactions                        | ⬜ Not started |
 | S10 | PATCH /transactions/:id                  | ⬜ Not started |
 | S11 | GET /dashboard/summary                   | ⬜ Not started |
@@ -95,6 +95,47 @@ telas correspondentes do mobile.
 
 Use this section to record decisions made during each session.
 Add a new entry when closing a session.
+
+### S8 — GET /extratos
+**Closed:** 2026-05-10
+**Decisions:**
+- `GET /extratos` adicionado ao `ExtratosController` reutilizando o
+  módulo (não foi necessário criar arquivo novo) — mantém a fronteira
+  do módulo Extratos coesa, conforme `code-standards.md`.
+- DTO de query em `extratos/dto/list-extratos.query.ts` com `mesAno` e
+  `banco` opcionais. `mesAno` reusa o mesmo regex de
+  `ImportExtratoDto` (`^\d{4}-(0[1-9]|1[0-2])$`); `banco` é string
+  não-vazia (MVP: sem whitelist, igual ao POST). Sem paginação no MVP
+  conforme o plano.
+- `ExtratosService.list(clerkId, query)` resolve `userId` via
+  `UsersService.resolveUserId` (mesmo helper do POST) — o filtro
+  `where.userId` nunca vem do request. Spreads condicionais
+  `...(query.mesAno ? { mesAno } : {})` evitam injetar `undefined`
+  no `where`, o que Prisma trataria como literal `null`. Order:
+  `createdAt: 'desc'`.
+- `select` explícito retorna apenas `{ id, banco, mesAno, createdAt }`
+  — sem `userId` no payload (não é sensível, mas é redundante e
+  evita acoplar a chave interna ao cliente). Satisfaz "Sem dados
+  sensíveis no payload" do plano.
+- Tipo `ExtratoListItem` exportado pelo service, consumido pelo
+  controller no shape `{ data: ExtratoListItem[] }` — mesma
+  convenção do `code-standards.md` (envelope `{ data }`).
+- 5 testes unitários novos no `ExtratosService`: query sem filtros
+  (ownership + ordem + select), filtro só `mesAno`, filtro só `banco`,
+  combinado, e propagação de `NotFoundException` de `resolveUserId`.
+- 4 testes E2E novos: 401 sem token; **isolamento entre dois
+  usuários** (criterio de aceite — userA vê só seus 2, userB vê só
+  o seu 1, e cada `findMany` carrega o `userId` correto resolvido
+  do token, nunca do request); filtro `?mesAno=...` repassa para
+  Prisma; 400 quando `mesAno` mal formado.
+- Lint dos arquivos novos limpo (zero erros novos introduzidos);
+  os 11 erros do baseline (em `clerk-auth.guard.spec.ts`,
+  `prisma.service.spec.ts` e no E2E do POST) são pré-existentes
+  de S3/S7 e serão tratados em S15 junto com o hardening.
+- Totais: 51 unit (6 suites, +5) + 16 E2E (+4) — 1 todo
+  (placeholder de `app.e2e-spec.ts`). Cobertura: 100%
+  statements/lines/functions, 90.41% branches global.
+**Deviations from plan:** Nenhuma.
 
 ### S7 — POST /extratos: IA + persistência
 **Closed:** 2026-05-10

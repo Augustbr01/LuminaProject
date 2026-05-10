@@ -2,18 +2,25 @@ import {
   Body,
   Controller,
   FileTypeValidator,
+  Get,
   HttpCode,
   HttpStatus,
   MaxFileSizeValidator,
   ParseFilePipe,
   Post,
+  Query,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ImportExtratoDto } from './dto/import-extrato.dto';
-import { ExtratosService, ImportExtratoResult } from './extratos.service';
+import { ListExtratosQueryDto } from './dto/list-extratos.query';
+import {
+  ExtratoListItem,
+  ExtratosService,
+  ImportExtratoResult,
+} from './extratos.service';
 
 const MAX_PDF_SIZE_BYTES = 10 * 1024 * 1024;
 
@@ -53,5 +60,17 @@ export class ExtratosController {
       file.buffer,
     );
     return { data: result };
+  }
+
+  @Get()
+  async list(
+    @Query() query: ListExtratosQueryDto,
+    @CurrentUser() currentUser: { clerkId: string },
+  ): Promise<{ data: ExtratoListItem[] }> {
+    const extratos = await this.extratosService.list(
+      currentUser.clerkId,
+      query,
+    );
+    return { data: extratos };
   }
 }

@@ -11,6 +11,7 @@ import { IaApiError, IaParseError } from '../ia/types/ia-errors';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import { ImportExtratoDto } from './dto/import-extrato.dto';
+import { ListExtratosQueryDto } from './dto/list-extratos.query';
 import { EXTRATO_ERROR_CODES } from './types/extrato-errors';
 import {
   PdfDecryptionService,
@@ -26,6 +27,13 @@ export interface ImportExtratoResult {
     createdAt: Date;
   };
   transactions: Transaction[];
+}
+
+export interface ExtratoListItem {
+  id: string;
+  banco: string;
+  mesAno: string;
+  createdAt: Date;
 }
 
 @Injectable()
@@ -67,6 +75,23 @@ export class ExtratosService {
     const extracted = await this.callIa(decryptedBuffer, dto);
 
     return this.persist(userId, dto, extracted);
+  }
+
+  async list(
+    clerkId: string,
+    query: ListExtratosQueryDto,
+  ): Promise<ExtratoListItem[]> {
+    const userId = await this.usersService.resolveUserId(clerkId);
+
+    return this.prisma.extrato.findMany({
+      where: {
+        userId,
+        ...(query.mesAno ? { mesAno: query.mesAno } : {}),
+        ...(query.banco ? { banco: query.banco } : {}),
+      },
+      select: { id: true, banco: true, mesAno: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   private async decryptOrReject(

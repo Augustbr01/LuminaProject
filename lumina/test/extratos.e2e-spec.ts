@@ -19,7 +19,7 @@ jest.mock('@clerk/clerk-sdk-node', () => ({
     mockVerifyToken(...args),
 }));
 
-describe('Extratos (e2e) — POST /extratos', () => {
+describe('Extratos (e2e) — POST /extratos and GET /extratos', () => {
   let app: INestApplication;
   let prisma: PrismaMock;
   let pdfDecryption: { ensureDecrypted: jest.Mock };
@@ -59,6 +59,7 @@ describe('Extratos (e2e) — POST /extratos', () => {
     mockVerifyToken.mockReset();
     prisma.user.findUnique.mockReset();
     prisma.extrato.findUnique.mockReset();
+    prisma.extrato.findMany.mockReset();
     prisma.$transaction.mockReset();
     pdfDecryption.ensureDecrypted.mockReset();
     iaService.extractTransactions.mockReset();
@@ -286,5 +287,141 @@ describe('Extratos (e2e) — POST /extratos', () => {
       const serialized = JSON.stringify(call);
       expect(serialized).not.toContain('%PDF-1.4');
     }
+  });
+
+  describe('GET /extratos', () => {
+    const clerkIdA = 'clerk_user_a';
+    const clerkIdB = 'clerk_user_b';
+    const userIdA = 'user-a-internal';
+    const userIdB = 'user-b-internal';
+
+    const userAExtratos = [
+      {
+        id: 'e-a-2',
+        banco: 'nubank',
+        mesAno: '2026-04',
+        createdAt: new Date('2026-04-30T12:00:00.000Z'),
+      },
+      {
+        id: 'e-a-1',
+        banco: 'itau',
+        mesAno: '2026-03',
+        createdAt: new Date('2026-03-30T12:00:00.000Z'),
+      },
+    ];
+
+    const userBExtratos = [
+      {
+        id: 'e-b-1',
+        banco: 'bradesco',
+        mesAno: '2026-04',
+        createdAt: new Date('2026-04-29T12:00:00.000Z'),
+      },
+    ];
+
+    it('returns 401 when no Authorization header is sent', async () => {
+      await request(app.getHttpServer() as App)
+        .get('/extratos')
+        .expect(401);
+      expect(prisma.extrato.findMany).not.toHaveBeenCalled();
+    });
+
+    it('returns only the authenticated user’s extratos (ownership isolation between two users)', async () => {
+      mockVerifyToken.mockImplementation((token: unknown) => {
+        if (token === 'token.user.a') return Promise.resolve({ sub: clerkIdA });
+        if (token === 'token.user.b') return Promise.resolve({ sub: clerkIdB });
+        return Promise.reject(new Error('unexpected token'));
+      });
+
+      prisma.user.findUnique.mockImplementation(
+        (args: { where: { clerkId: string } }) => {
+          if (args.where.clerkId === clerkIdA)
+            return Promise.resolve({ id: userIdA });
+          if (args.where.clerkId === clerkIdB)
+            return Promise.resolve({ id: userIdB });
+          return Promise.resolve(null);
+        },
+      );
+
+      prisma.extrato.findMany.mockImplementation(
+        (args: { where: { userId: string } }) => {
+          if (args.where.userId === userIdA)
+            return Promise.resolve(userAExtratos);
+          if (args.where.userId === userIdB)
+            return Promise.resolve(userBExtratos);
+          return Promise.resolve([]);
+        },
+      );
+
+      const responseA = await request(app.getHttpServer() as App)
+        .get('/extratos')
+        .set('Authorization', 'Bearer token.user.a')
+        .expect(200);
+
+      const responseB = await request(app.getHttpServer() as App)
+        .get('/extratos')
+        .set('Authorization', 'Bearer token.user.b')
+        .expect(200);
+
+      const bodyA = responseA.body as { data: Array<{ id: string }> };
+      const bodyB = responseB.body as { data: Array<{ id: string }> };
+      const dataA = bodyA.data;
+      const dataB = bodyB.data;
+
+      expect(dataA.map((e) => e.id)).toEqual(['e-a-2', 'e-a-1']);
+      expect(dataB.map((e) => e.id)).toEqual(['e-b-1']);
+
+      // No leakage between users.
+      expect(dataA.some((e) => e.id.startsWith('e-b-'))).toBe(false);
+      expect(dataB.some((e) => e.id.startsWith('e-a-'))).toBe(false);
+
+      // Every findMany call carried the correct userId filter — it is
+      // never sourced from the request.
+      const findManyCalls = prisma.extrato.findMany.mock.calls as Array<
+        [{ where: { userId: string } }]
+      >;
+      const calledUserIds = findManyCalls.map((call) => call[0].where.userId);
+      expect(calledUserIds).toEqual([userIdA, userIdB]);
+    });
+
+    it('applies the mesAno filter to the prisma query', async () => {
+      mockVerifyToken.mockResolvedValue({ sub: clerkIdA });
+      prisma.user.findUnique.mockResolvedValue({ id: userIdA });
+      prisma.extrato.findMany.mockResolvedValue([userAExtratos[0]]);
+
+      const response = await request(app.getHttpServer() as App)
+        .get('/extratos')
+        .query({ mesAno: '2026-04' })
+        .set('Authorization', 'Bearer token.user.a')
+        .expect(200);
+
+      expect(prisma.extrato.findMany).toHaveBeenCalledWith({
+        where: { userId: userIdA, mesAno: '2026-04' },
+        select: { id: true, banco: true, mesAno: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      const body = response.body as { data: unknown };
+      expect(body.data).toEqual([
+        {
+          id: 'e-a-2',
+          banco: 'nubank',
+          mesAno: '2026-04',
+          createdAt: '2026-04-30T12:00:00.000Z',
+        },
+      ]);
+    });
+
+    it('returns 400 when mesAno is malformed', async () => {
+      mockVerifyToken.mockResolvedValue({ sub: clerkIdA });
+      prisma.user.findUnique.mockResolvedValue({ id: userIdA });
+
+      await request(app.getHttpServer() as App)
+        .get('/extratos')
+        .query({ mesAno: '2026-13' })
+        .set('Authorization', 'Bearer token.user.a')
+        .expect(400);
+
+      expect(prisma.extrato.findMany).not.toHaveBeenCalled();
+    });
   });
 });
