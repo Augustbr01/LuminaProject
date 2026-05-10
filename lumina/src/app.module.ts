@@ -5,9 +5,16 @@ import { ClerkAuthGuard } from './common/guards/clerk-auth.guard';
 import { IaModule } from './ia/ia.module';
 import { UsersModule } from './users/users.module';
 import { ExtratosModule } from './extratos/extratos.module';
+import { TransactionsModule } from './transactions/transactions.module';
 
 @Module({
-  imports: [PrismaModule, UsersModule, IaModule, ExtratosModule],
+  imports: [
+    PrismaModule,
+    UsersModule,
+    IaModule,
+    ExtratosModule,
+    TransactionsModule,
+  ],
   controllers: [],
   providers: [
     {

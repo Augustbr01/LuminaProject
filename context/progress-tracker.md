@@ -8,7 +8,7 @@ the implementation currently stands.
 
 ## ▶ Current Session
 
-**S9 — GET /transactions**
+**S10 — PATCH /transactions/:id (revisão)**
 
 > Read the full definition of this session in
 > `context/backend-development-plan.md` before starting.
@@ -28,7 +28,7 @@ the implementation currently stands.
 | S6  | POST /extratos: regra (sem IA)           | ✅ Completed   |
 | S7  | POST /extratos: IA + persistência        | ✅ Completed   |
 | S8  | GET /extratos                            | ✅ Completed   |
-| S9  | GET /transactions                        | ⬜ Not started |
+| S9  | GET /transactions                        | ✅ Completed   |
 | S10 | PATCH /transactions/:id                  | ⬜ Not started |
 | S11 | GET /dashboard/summary                   | ⬜ Not started |
 | S12 | GET /dashboard/history                   | ⬜ Not started |
@@ -95,6 +95,62 @@ telas correspondentes do mobile.
 
 Use this section to record decisions made during each session.
 Add a new entry when closing a session.
+
+### S9 — GET /transactions
+**Closed:** 2026-05-10
+**Decisions:**
+- Novo módulo `transactions/` criado (controller, service, module, DTO)
+  — fronteira própria conforme `code-standards.md`. `TransactionsModule`
+  importa apenas `UsersModule` (para `resolveUserId`); o `PrismaService`
+  vem via `PrismaModule` global. Registrado em `AppModule`.
+- DTO `ListTransactionsQueryDto`: `mesAno` reusa o mesmo regex de
+  Extratos (`^\d{4}-(0[1-9]|1[0-2])$`); `banco` string não-vazia;
+  `onlyUnreviewed` é boolean opcional. Query string só carrega
+  strings — usado `@Transform` (`class-transformer`) para converter
+  `'true'`/`'false'` em boolean antes do `@IsBoolean`. Qualquer
+  outro valor cai no validator e gera 400 (testado no E2E).
+  Sem `enableImplicitConversion` no ValidationPipe pra evitar que
+  truthy strings virem `true` por engano.
+- `TransactionsService.list` filtra **toda transação pelo `extrato.userId`**
+  via relação aninhada do Prisma — não há `Transaction.userId` no
+  schema, então a ownership só pode ser garantida pelo Extrato.
+  Critério "nenhuma query retorna transação de outro usuário em
+  qualquer combinação de filtros" satisfeito porque o `userId` está
+  sempre dentro do `where.extrato.{...}` e vem de
+  `usersService.resolveUserId(clerkId)` — nunca da request.
+- Filtros `mesAno` e `banco` entram **dentro** de `where.extrato`
+  (compartilham o mesmo objeto com `userId` — o Prisma transforma
+  num único JOIN). Filtro `reviewed: false` fica no topo, sobre a
+  própria `Transaction` (campo dela, não do Extrato). `onlyUnreviewed`
+  só aplica o filtro quando `=== true` — `false` ou ausente carrega
+  todas, conforme intuição da UI.
+- Spreads condicionais (`...(query.mesAno ? { mesAno } : {})`) seguem
+  o mesmo padrão de `ExtratosService.list` em S8 — evita injetar
+  `undefined` no `where`, que o Prisma trataria como literal `null`.
+- `findMany` retorna todos os campos da `Transaction` (incluindo
+  `amount`, `confidence` como string serializada do Decimal, `type`,
+  `category`, `reviewed`, `createdAt`, `updatedAt`). Não há campos
+  sensíveis no modelo. Order: `date: 'desc'` (mais recente primeiro).
+- Controller devolve `{ data: Transaction[] }` no envelope padrão do
+  `code-standards.md` (mesmo formato do `/extratos`, `/users/sync`).
+- 8 testes unitários: sem filtros (ownership + select + ordem), só
+  `mesAno`, só `banco`, `onlyUnreviewed=true`, `onlyUnreviewed=false`
+  (não aplica filtro), combinado, `userId` nunca vem do request,
+  propagação de `NotFoundException` de `resolveUserId`.
+- 7 testes E2E novos: 401 sem token; **isolamento entre dois
+  usuários** (criterio de aceite — userA vê só 2, userB vê só 1,
+  cada `findMany` carrega o `userId` correto dentro de `extrato`);
+  `onlyUnreviewed=true` retorna apenas `reviewed=false`; filtro
+  `mesAno` repassa pro Prisma; filtro `banco` repassa pro Prisma;
+  400 quando `mesAno` mal formado; 400 quando `onlyUnreviewed=maybe`.
+- Totais: 59 unit (7 suites, +8) + 23 E2E (+7, 1 todo) — cobertura
+  100% statements/lines/functions, 89.65% branches global. Branches
+  do `transactions.service.ts` ficam em 85.71% pelo mesmo artefato
+  do istanbul instrumentando parameter-properties que aparece em
+  `extratos.service.ts` — toda lógica real (3 spreads + filtro
+  `onlyUnreviewed`) está coberta.
+- Lint dos arquivos novos limpo (zero erros novos).
+**Deviations from plan:** Nenhuma.
 
 ### S8 — GET /extratos
 **Closed:** 2026-05-10
