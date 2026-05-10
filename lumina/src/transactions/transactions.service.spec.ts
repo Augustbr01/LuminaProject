@@ -1,4 +1,6 @@
+import { NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { Category } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import { TransactionsService } from './transactions.service';
@@ -59,84 +61,175 @@ describe('TransactionsService', () => {
     prisma.transaction.findMany.mockResolvedValue(sampleTransactions);
   });
 
-  it('scopes the query to the authenticated user via extrato.userId and orders by date desc', async () => {
-    const result = await service.list(clerkId, {});
+  describe('list', () => {
+    it('scopes the query to the authenticated user via extrato.userId and orders by date desc', async () => {
+      const result = await service.list(clerkId, {});
 
-    expect(usersService.resolveUserId).toHaveBeenCalledWith(clerkId);
-    expect(prisma.transaction.findMany).toHaveBeenCalledWith({
-      where: { extrato: { userId } },
-      orderBy: { date: 'desc' },
-    });
-    expect(result).toBe(sampleTransactions);
-  });
-
-  it('applies the mesAno filter to the nested extrato relation', async () => {
-    await service.list(clerkId, { mesAno: '2026-04' });
-
-    expect(prisma.transaction.findMany).toHaveBeenCalledWith({
-      where: { extrato: { userId, mesAno: '2026-04' } },
-      orderBy: { date: 'desc' },
-    });
-  });
-
-  it('applies the banco filter to the nested extrato relation', async () => {
-    await service.list(clerkId, { banco: 'nubank' });
-
-    expect(prisma.transaction.findMany).toHaveBeenCalledWith({
-      where: { extrato: { userId, banco: 'nubank' } },
-      orderBy: { date: 'desc' },
-    });
-  });
-
-  it('applies reviewed=false on the transaction itself when onlyUnreviewed=true', async () => {
-    await service.list(clerkId, { onlyUnreviewed: true });
-
-    expect(prisma.transaction.findMany).toHaveBeenCalledWith({
-      where: { extrato: { userId }, reviewed: false },
-      orderBy: { date: 'desc' },
-    });
-  });
-
-  it('does NOT apply the reviewed filter when onlyUnreviewed=false', async () => {
-    await service.list(clerkId, { onlyUnreviewed: false });
-
-    expect(prisma.transaction.findMany).toHaveBeenCalledWith({
-      where: { extrato: { userId } },
-      orderBy: { date: 'desc' },
-    });
-  });
-
-  it('combines mesAno, banco and onlyUnreviewed in a single where clause', async () => {
-    await service.list(clerkId, {
-      mesAno: '2026-04',
-      banco: 'nubank',
-      onlyUnreviewed: true,
+      expect(usersService.resolveUserId).toHaveBeenCalledWith(clerkId);
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith({
+        where: { extrato: { userId } },
+        orderBy: { date: 'desc' },
+      });
+      expect(result).toBe(sampleTransactions);
     });
 
-    expect(prisma.transaction.findMany).toHaveBeenCalledWith({
-      where: {
-        extrato: { userId, mesAno: '2026-04', banco: 'nubank' },
-        reviewed: false,
-      },
-      orderBy: { date: 'desc' },
+    it('applies the mesAno filter to the nested extrato relation', async () => {
+      await service.list(clerkId, { mesAno: '2026-04' });
+
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith({
+        where: { extrato: { userId, mesAno: '2026-04' } },
+        orderBy: { date: 'desc' },
+      });
+    });
+
+    it('applies the banco filter to the nested extrato relation', async () => {
+      await service.list(clerkId, { banco: 'nubank' });
+
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith({
+        where: { extrato: { userId, banco: 'nubank' } },
+        orderBy: { date: 'desc' },
+      });
+    });
+
+    it('applies reviewed=false on the transaction itself when onlyUnreviewed=true', async () => {
+      await service.list(clerkId, { onlyUnreviewed: true });
+
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith({
+        where: { extrato: { userId }, reviewed: false },
+        orderBy: { date: 'desc' },
+      });
+    });
+
+    it('does NOT apply the reviewed filter when onlyUnreviewed=false', async () => {
+      await service.list(clerkId, { onlyUnreviewed: false });
+
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith({
+        where: { extrato: { userId } },
+        orderBy: { date: 'desc' },
+      });
+    });
+
+    it('combines mesAno, banco and onlyUnreviewed in a single where clause', async () => {
+      await service.list(clerkId, {
+        mesAno: '2026-04',
+        banco: 'nubank',
+        onlyUnreviewed: true,
+      });
+
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith({
+        where: {
+          extrato: { userId, mesAno: '2026-04', banco: 'nubank' },
+          reviewed: false,
+        },
+        orderBy: { date: 'desc' },
+      });
+    });
+
+    it('never sources userId from the request — always resolved from clerkId', async () => {
+      await service.list(clerkId, { mesAno: '2026-04', banco: 'nubank' });
+
+      const calls = prisma.transaction.findMany.mock.calls as Array<
+        [{ where: { extrato: { userId: string } } }]
+      >;
+      expect(calls[0][0].where.extrato.userId).toBe(userId);
+    });
+
+    it('propagates NotFoundException when the user does not exist', async () => {
+      const notFound = new Error('User not found');
+      usersService.resolveUserId.mockReset();
+      usersService.resolveUserId.mockRejectedValue(notFound);
+
+      await expect(service.list(clerkId, {})).rejects.toBe(notFound);
+      expect(prisma.transaction.findMany).not.toHaveBeenCalled();
     });
   });
 
-  it('never sources userId from the request — always resolved from clerkId', async () => {
-    await service.list(clerkId, { mesAno: '2026-04', banco: 'nubank' });
+  describe('update', () => {
+    const transactionId = 'tx-1';
+    const updatedTransaction = {
+      ...sampleTransactions[1],
+      category: 'transporte',
+      reviewed: true,
+      updatedAt: new Date('2026-05-10T12:00:00.000Z'),
+    };
 
-    const calls = prisma.transaction.findMany.mock.calls as Array<
-      [{ where: { extrato: { userId: string } } }]
-    >;
-    expect(calls[0][0].where.extrato.userId).toBe(userId);
-  });
+    it('updates category and sets reviewed=true scoped by extrato.userId', async () => {
+      prisma.transaction.updateMany.mockResolvedValue({ count: 1 });
+      prisma.transaction.findUniqueOrThrow.mockResolvedValue(
+        updatedTransaction,
+      );
 
-  it('propagates NotFoundException when the user does not exist', async () => {
-    const notFound = new Error('User not found');
-    usersService.resolveUserId.mockReset();
-    usersService.resolveUserId.mockRejectedValue(notFound);
+      const result = await service.update(clerkId, transactionId, {
+        category: Category.transporte,
+      });
 
-    await expect(service.list(clerkId, {})).rejects.toBe(notFound);
-    expect(prisma.transaction.findMany).not.toHaveBeenCalled();
+      expect(usersService.resolveUserId).toHaveBeenCalledWith(clerkId);
+      expect(prisma.transaction.updateMany).toHaveBeenCalledWith({
+        where: { id: transactionId, extrato: { userId } },
+        data: { category: Category.transporte, reviewed: true },
+      });
+      expect(prisma.transaction.findUniqueOrThrow).toHaveBeenCalledWith({
+        where: { id: transactionId },
+      });
+      expect(result).toBe(updatedTransaction);
+    });
+
+    it('throws NotFoundException when transaction does not belong to the user (count=0)', async () => {
+      prisma.transaction.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.update(clerkId, transactionId, {
+          category: Category.transporte,
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(prisma.transaction.findUniqueOrThrow).not.toHaveBeenCalled();
+    });
+
+    it('sets reviewed=true even when the new category equals the existing one', async () => {
+      prisma.transaction.updateMany.mockResolvedValue({ count: 1 });
+      prisma.transaction.findUniqueOrThrow.mockResolvedValue({
+        ...sampleTransactions[1],
+        reviewed: true,
+      });
+
+      await service.update(clerkId, transactionId, {
+        category: Category.alimentacao,
+      });
+
+      expect(prisma.transaction.updateMany).toHaveBeenCalledWith({
+        where: { id: transactionId, extrato: { userId } },
+        data: { category: Category.alimentacao, reviewed: true },
+      });
+    });
+
+    it('never sources userId from the request — always resolved from clerkId', async () => {
+      prisma.transaction.updateMany.mockResolvedValue({ count: 1 });
+      prisma.transaction.findUniqueOrThrow.mockResolvedValue(
+        updatedTransaction,
+      );
+
+      await service.update(clerkId, transactionId, {
+        category: Category.transporte,
+      });
+
+      const calls = prisma.transaction.updateMany.mock.calls as Array<
+        [{ where: { extrato: { userId: string } } }]
+      >;
+      expect(calls[0][0].where.extrato.userId).toBe(userId);
+    });
+
+    it('propagates NotFoundException when the user does not exist', async () => {
+      const notFound = new Error('User not found');
+      usersService.resolveUserId.mockReset();
+      usersService.resolveUserId.mockRejectedValue(notFound);
+
+      await expect(
+        service.update(clerkId, transactionId, {
+          category: Category.transporte,
+        }),
+      ).rejects.toBe(notFound);
+      expect(prisma.transaction.updateMany).not.toHaveBeenCalled();
+    });
   });
 });
