@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm ls *)",
+      "Bash(npm view *)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(npm config *)",
+      "Bash(qpdf --version)",
+      "Bash(where.exe qpdf *)",
+      "Bash(powershell.exe -Command \"Get-Command qpdf -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source\")",
+      "Bash(powershell.exe -NoProfile -Command \"Get-Command qpdf -ErrorAction SilentlyContinue | Format-List Source, Version; Write-Output '---'; Get-ChildItem 'C:\\\\Program Files\\\\qpdf*','C:\\\\Program Files \\(x86\\)\\\\qpdf*' -ErrorAction SilentlyContinue | Select-Object FullName\")",
+      "Bash(powershell.exe -NoProfile -Command \"Get-ChildItem 'C:\\\\Program Files\\\\qpdf 12.3.2' -Recurse -Filter qpdf.exe | Select-Object -ExpandProperty FullName\")",
+      "Bash(git reset *)",
+      "Bash(git fetch *)"
+    ]
+  }
+}
