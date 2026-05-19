@@ -48,7 +48,23 @@ describe('Goals (e2e)', () => {
     prisma.user.findUnique.mockReset();
     prisma.goal.create.mockReset();
     prisma.goal.findMany.mockReset();
+    prisma.transaction.aggregate.mockReset();
+    prisma.extrato.findMany.mockReset();
   });
+
+  // `transaction.aggregate` is hit both for the user-level monthly rate
+  // (no `_max`) and per goal for its contributions (with `_max`).
+  const stubAggregate = (
+    rate: { _sum: { amount: string | null } },
+    contributions: {
+      _sum: { amount: string | null };
+      _max: { date: Date | null };
+    },
+  ): void => {
+    prisma.transaction.aggregate.mockImplementation((args: { _max?: unknown }) =>
+      Promise.resolve(args._max ? contributions : rate),
+    );
+  };
 
   describe('POST /goals', () => {
     it('returns 401 when no Authorization header is sent', async () => {
@@ -155,7 +171,7 @@ describe('Goals (e2e)', () => {
       expect(prisma.goal.findMany).not.toHaveBeenCalled();
     });
 
-    it('returns only the goals of the authenticated user (no progress fields)', async () => {
+    it('returns the goals of the authenticated user enriched with progress fields', async () => {
       mockVerifyToken.mockResolvedValue({ sub: clerkIdA });
       prisma.user.findUnique.mockResolvedValue({ id: userIdA });
       prisma.goal.findMany.mockResolvedValue([
@@ -167,6 +183,18 @@ describe('Goals (e2e)', () => {
           createdAt: new Date('2026-05-12T00:00:00.000Z'),
         },
       ]);
+      // total 4000 over 2 distinct months → rate 2000/month.
+      prisma.extrato.findMany.mockResolvedValue([
+        { mesAno: '2026-04' },
+        { mesAno: '2026-05' },
+      ]);
+      stubAggregate(
+        { _sum: { amount: '4000' } },
+        {
+          _sum: { amount: '2500' },
+          _max: { date: new Date('2026-05-20T00:00:00.000Z') },
+        },
+      );
 
       const response = await request(app.getHttpServer() as App)
         .get('/goals')
@@ -181,10 +209,12 @@ describe('Goals (e2e)', () => {
         targetAmount: 5000,
         deadline: futureDeadline,
         createdAt: '2026-05-12T00:00:00.000Z',
+        valorAcumulado: 2500,
+        percentual: 50,
+        // ceil((5000 - 2500) / 2000) = 2 months after createdAt.
+        previsaoConclusao: '2026-07-12T00:00:00.000Z',
       });
       expect(body.data[0]).not.toHaveProperty('userId');
-      expect(body.data[0]).not.toHaveProperty('valorAcumulado');
-      expect(body.data[0]).not.toHaveProperty('percentual');
     });
 
     it('isolates goals between two distinct users', async () => {
@@ -225,6 +255,12 @@ describe('Goals (e2e)', () => {
             ]);
           return Promise.resolve([]);
         },
+      );
+
+      prisma.extrato.findMany.mockResolvedValue([]);
+      stubAggregate(
+        { _sum: { amount: null } },
+        { _sum: { amount: null }, _max: { date: null } },
       );
 
       const responseA = await request(app.getHttpServer() as App)
