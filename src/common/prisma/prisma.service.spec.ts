@@ -3,6 +3,8 @@ import { PrismaService } from './prisma.service';
 
 describe('PrismaService', () => {
   let service: PrismaService;
+  let connectSpy: jest.SpyInstance;
+  let disconnectSpy: jest.SpyInstance;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -11,10 +13,10 @@ describe('PrismaService', () => {
 
     service = module.get<PrismaService>(PrismaService);
 
-    jest
+    connectSpy = jest
       .spyOn(service as unknown as { $connect(): Promise<void> }, '$connect')
       .mockImplementation(() => Promise.resolve());
-    jest
+    disconnectSpy = jest
       .spyOn(
         service as unknown as { $disconnect(): Promise<void> },
         '$disconnect',
@@ -28,11 +30,11 @@ describe('PrismaService', () => {
 
   it('should connect on module init without error', async () => {
     await expect(service.onModuleInit()).resolves.not.toThrow();
-    expect(service.$connect).toHaveBeenCalledTimes(1);
+    expect(connectSpy).toHaveBeenCalledTimes(1);
   });
 
   it('should disconnect on module destroy without error', async () => {
     await expect(service.onModuleDestroy()).resolves.not.toThrow();
-    expect(service.$disconnect).toHaveBeenCalledTimes(1);
+    expect(disconnectSpy).toHaveBeenCalledTimes(1);
   });
 });

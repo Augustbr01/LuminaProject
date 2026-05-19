@@ -8,6 +8,7 @@ import { ExtratosModule } from './extratos/extratos.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { GoalsModule } from './goals/goals.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { GoalsModule } from './goals/goals.module';
     TransactionsModule,
     DashboardModule,
     GoalsModule,
+    HealthModule,
   ],
   controllers: [],
   providers: [
