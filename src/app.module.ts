@@ -7,6 +7,7 @@ import { UsersModule } from './users/users.module';
 import { ExtratosModule } from './extratos/extratos.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { GoalsModule } from './goals/goals.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
     ExtratosModule,
     TransactionsModule,
     DashboardModule,
+    GoalsModule,
   ],
   controllers: [],
   providers: [
