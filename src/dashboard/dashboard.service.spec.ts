@@ -234,4 +234,84 @@ describe('DashboardService', () => {
       expect(prisma.transaction.aggregate).not.toHaveBeenCalled();
     });
   });
+
+  describe('history', () => {
+    const expectedMonths = (): string[] => {
+      const now = new Date();
+      const months: string[] = [];
+      let year = now.getUTCFullYear();
+      let month = now.getUTCMonth() + 1;
+      for (let i = 0; i < 6; i++) {
+        months.unshift(`${year}-${String(month).padStart(2, '0')}`);
+        month = month === 1 ? 12 : month - 1;
+        if (month === 12) year -= 1;
+      }
+      return months;
+    };
+
+    it('returns exactly 6 zeroed entries when no month has data', async () => {
+      const result = await service.history(clerkId);
+
+      expect(usersService.resolveUserId).toHaveBeenCalledWith(clerkId);
+      expect(result.history).toHaveLength(6);
+      expect(result.history.every((e) => e.totalGasto === 0)).toBe(true);
+    });
+
+    it('returns the last 6 months in ascending order with the current month last', async () => {
+      const result = await service.history(clerkId);
+
+      const months = expectedMonths();
+      expect(result.history.map((e) => e.mesAno)).toEqual(months);
+      expect(result.history[5].mesAno).toBe(months[5]);
+    });
+
+    it('returns 0 for months without data and the total for months with data', async () => {
+      const months = expectedMonths();
+      prisma.transaction.aggregate.mockImplementation(
+        (args: { where: { extrato: { mesAno: string } } }) => {
+          if (args.where.extrato.mesAno === months[3])
+            return Promise.resolve({ _sum: { amount: '750.25' } });
+          if (args.where.extrato.mesAno === months[5])
+            return Promise.resolve({ _sum: { amount: '1200.00' } });
+          return Promise.resolve({ _sum: { amount: null } });
+        },
+      );
+
+      const result = await service.history(clerkId);
+
+      expect(result.history).toHaveLength(6);
+      expect(result.history[0].totalGasto).toBe(0);
+      expect(result.history[3].totalGasto).toBe(750.25);
+      expect(result.history[5].totalGasto).toBe(1200);
+    });
+
+    it('scopes every aggregate query to the authenticated user filtering debit type', async () => {
+      await service.history(clerkId);
+
+      const calls = prisma.transaction.aggregate.mock.calls as Array<
+        [
+          {
+            where: {
+              type: TransactionType;
+              extrato: { userId: string; mesAno: string };
+            };
+          },
+        ]
+      >;
+      expect(calls).toHaveLength(6);
+      for (const [arg] of calls) {
+        expect(arg.where.type).toBe(TransactionType.debit);
+        expect(arg.where.extrato.userId).toBe(userId);
+      }
+    });
+
+    it('propagates NotFoundException when the user does not exist', async () => {
+      const notFound = new Error('User not found');
+      usersService.resolveUserId.mockReset();
+      usersService.resolveUserId.mockRejectedValue(notFound);
+
+      await expect(service.history(clerkId)).rejects.toBe(notFound);
+      expect(prisma.transaction.aggregate).not.toHaveBeenCalled();
+    });
+  });
 });

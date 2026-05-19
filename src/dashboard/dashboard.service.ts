@@ -23,6 +23,15 @@ export interface DashboardSummary {
   pieChart: PieChartEntry[];
 }
 
+export interface HistoryEntry {
+  mesAno: string;
+  totalGasto: number;
+}
+
+export interface DashboardHistory {
+  history: HistoryEntry[];
+}
+
 @Injectable()
 export class DashboardService {
   constructor(
@@ -103,6 +112,33 @@ export class DashboardService {
     };
   }
 
+  async history(clerkId: string): Promise<DashboardHistory> {
+    const userId = await this.usersService.resolveUserId(clerkId);
+    const months = DashboardService.lastSixMesAnos();
+
+    const aggregates = await Promise.all(
+      months.map((mesAno) =>
+        this.prisma.transaction.aggregate({
+          where: {
+            type: TransactionType.debit,
+            extrato: { userId, mesAno },
+          },
+          _sum: { amount: true },
+        }),
+      ),
+    );
+
+    const history: HistoryEntry[] = months.map((mesAno, i) => ({
+      mesAno,
+      totalGasto:
+        aggregates[i]._sum.amount != null
+          ? DashboardService.round(Number(aggregates[i]._sum.amount), 2)
+          : 0,
+    }));
+
+    return { history };
+  }
+
   private static buildPieChart(
     rows: CategoryTotal[],
     totalGasto: number,
@@ -149,5 +185,15 @@ export class DashboardService {
     const prevMonth = month === 1 ? 12 : month - 1;
     const prevYear = month === 1 ? year - 1 : year;
     return `${prevYear}-${String(prevMonth).padStart(2, '0')}`;
+  }
+
+  private static lastSixMesAnos(): string[] {
+    const months: string[] = [];
+    let mesAno = DashboardService.currentMesAno();
+    for (let i = 0; i < 6; i++) {
+      months.unshift(mesAno);
+      mesAno = DashboardService.previousMesAno(mesAno);
+    }
+    return months;
   }
 }

@@ -8,7 +8,7 @@ the implementation currently stands.
 
 ## ▶ Current Session
 
-**S12 — GET /dashboard/history**
+**S13 — POST/GET /goals (sem progresso)**
 
 > Read the full definition of this session in
 > `context/backend-development-plan.md` before starting.
@@ -31,7 +31,7 @@ the implementation currently stands.
 | S9  | GET /transactions                        | ✅ Completed   |
 | S10 | PATCH /transactions/:id                  | ✅ Completed   |
 | S11 | GET /dashboard/summary                   | ✅ Completed   |
-| S12 | GET /dashboard/history                   | ⬜ Not started |
+| S12 | GET /dashboard/history                   | ✅ Completed   |
 | S13 | POST/GET /goals (sem progresso)          | ⬜ Not started |
 | S14 | Cálculo de progresso e previsão          | ⬜ Not started |
 | S15 | Hardening (validação, filter, logger)    | ⬜ Not started |
@@ -95,6 +95,60 @@ telas correspondentes do mobile.
 
 Use this section to record decisions made during each session.
 Add a new entry when closing a session.
+
+### S12 — GET /dashboard/history
+**Closed:** 2026-05-19
+**Decisions:**
+- `GET /dashboard/history` adicionado ao `DashboardController`
+  existente — mesmo módulo de S11, fronteira coesa. Sem query
+  params: o endpoint sempre retorna os 6 meses mais recentes
+  a partir do mês atual (UTC). `?banco=` não foi incluído —
+  o plano de S12 não o define (OQ-3 resolveu o filtro apenas
+  para `/dashboard/summary`).
+- `DashboardService.history(clerkId)` resolve `userId` via
+  `usersService.resolveUserId` (invariante 3 — `userId` nunca
+  vem do request) e faz **6** chamadas `prisma.transaction.aggregate`
+  em paralelo via `Promise.all`, uma por mês. Cada query filtra
+  `type: TransactionType.debit` + `extrato: { userId, mesAno }` —
+  mesmo padrão do `previousAggregate` de S11. Módulo continua
+  só lendo e agregando (invariante de `architecture.md`).
+- Optou-se por 6 `aggregate` (em vez de um `findMany` + agregação
+  em memória) para manter a soma server-side e a consistência
+  com S11. `groupBy` por mês não é viável: `mesAno` vive em
+  `Extrato`, não em `Transaction`, e o Prisma não agrupa por
+  campo de relação.
+- Helper `lastSixMesAnos()` reusa `currentMesAno()` e
+  `previousMesAno()` (já existentes de S11). Constrói o array
+  com `unshift`, garantindo ordem cronológica ascendente com
+  o mês atual sempre na última posição (índice 5) — critério
+  de aceite "mês atual é sempre o último".
+- Meses sem dados (`_sum.amount == null`) retornam `totalGasto: 0`;
+  array tem **sempre exatamente 6 entradas**. Decimal convertido
+  via `Number()` e arredondado a 2 casas (`round`), igual a S11.
+- Controller devolve `{ data: DashboardHistory }` onde
+  `DashboardHistory` é `{ history: HistoryEntry[] }` — envelope
+  `{ data }` do `code-standards.md`, mesmo formato de
+  `/dashboard/summary`.
+- 5 testes unitários novos em `describe('history')`: 6 entradas
+  zeradas sem dados; ordem ascendente com mês atual no fim;
+  dados parciais (meses sem dados → 0, com dados → total);
+  ownership (`userId` + `type=debit` em todas as 6 queries);
+  propagação de `NotFoundException` de `resolveUserId`.
+- 4 testes E2E novos em `describe('GET /dashboard/history')`:
+  401 sem token; 6 entradas zeradas sem dados; dados parciais
+  em ordem ascendente; isolamento entre dois usuários (cada
+  `aggregate` carrega o `userId` correto resolvido do token).
+  `describe` raiz do spec renomeado de "GET /dashboard/summary"
+  para "Dashboard (e2e)" — engloba summary e history.
+- Totais: 83 unit (8 suites, +5) + 38 E2E (+4, 1 todo).
+  Cobertura: 100% statements/lines/functions, 89.6% branches
+  global. `dashboard.service.ts` em 88.88% branches pelo
+  artefato conhecido do istanbul (linhas 38, 76, 158 — todas
+  código pré-existente de S11: spreads condicionais e ternário
+  do `buildPieChart`). Todo o código novo de S12 está 100%
+  coberto.
+- Lint dos arquivos novos limpo. `npm run build` passa sem erros.
+**Deviations from plan:** Nenhuma.
 
 ### S11 — GET /dashboard/summary
 **Closed:** 2026-05-10
