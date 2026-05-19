@@ -8,7 +8,7 @@ the implementation currently stands.
 
 ## ▶ Current Session
 
-**S14 — Cálculo de progresso e previsão**
+**S15 — Hardening (validação, filter, logger)**
 
 > Read the full definition of this session in
 > `context/backend-development-plan.md` before starting.
@@ -33,7 +33,7 @@ the implementation currently stands.
 | S11 | GET /dashboard/summary                   | ✅ Completed   |
 | S12 | GET /dashboard/history                   | ✅ Completed   |
 | S13 | POST/GET /goals (sem progresso)          | ✅ Completed   |
-| S14 | Cálculo de progresso e previsão          | ⬜ Not started |
+| S14 | Cálculo de progresso e previsão          | ✅ Completed   |
 | S15 | Hardening (validação, filter, logger)    | ⬜ Not started |
 | S16 | Deploy ready                             | ⬜ Not started |
 
@@ -95,6 +95,80 @@ telas correspondentes do mobile.
 
 Use this section to record decisions made during each session.
 Add a new entry when closing a session.
+
+### S14 — Cálculo de progresso e previsão
+**Closed:** 2026-05-19
+**Decisions:**
+- `GET /goals` enriquecido com `valorAcumulado`, `percentual` e
+  `previsaoConclusao` — novo tipo `GoalWithProgressDto extends
+  GoalDto`. `POST /goals` mantém o retorno básico `GoalDto`: o
+  plano de S14 só fala em enriquecer o GET, e uma meta recém-criada
+  não tem transações contribuintes (`date >= createdAt` no instante
+  da criação) — calcular progresso no POST seria query a vazio.
+- Progresso (`valorAcumulado`) conforme OQ-1 item 1: soma das
+  transações `category = investimento` com `date >= goal.createdAt`,
+  escopadas por `extrato.userId`. Filtro segue OQ-1 ao pé da letra
+  (categoria, sem `type`) — `investimento` é sempre débito (OQ-2),
+  então o filtro de tipo seria redundante.
+- `percentual = valorAcumulado / targetAmount * 100`, arredondado
+  a 2 casas e clampado em `[0, 100]` via `Math.min/Math.max` —
+  critério "nunca > 100 nem < 0". `targetAmount` é sempre > 0
+  (CHECK constraint), logo sem divisão por zero.
+- `previsaoConclusao` (OQ-1 item 2):
+  - meta já atingida (`valorAcumulado >= targetAmount`) → data da
+    última transação contribuinte (`_max.date` do aggregate). Não-
+    nulo por construção: soma positiva implica ≥1 transação.
+  - ritmo zero (`mediaMensal == 0`) → `null`.
+  - caso geral → `createdAt + ceil((targetAmount - valorAcumulado)
+    / mediaMensal)` meses, via `setUTCMonth`.
+- `mediaMensal` = total histórico de `investimento` do usuário ÷
+  nº de meses distintos (`mesAno`) com ≥1 transação. Calculada
+  uma vez por usuário (`monthlyInvestmentRate`) e reusada em todas
+  as metas — figura de nível usuário, independente da meta. Meses
+  distintos via `Set` sobre `extrato.findMany({ where: { userId,
+  transactions: { some: {} } }, select: { mesAno } })` — extrato
+  vazio (0 transações) não conta no denominador.
+- **Refinamento de OQ-1:** a fórmula literal é `createdAt +
+  remaining / mediaMensal` (contínua). Implementada com
+  `Math.ceil` em meses inteiros + `setUTCMonth` (calendário).
+  Razão: `mediaMensal` é média grosseira; previsão ao milissegundo
+  seria falsa precisão. A granularidade mensal casa com a dos
+  extratos (mensais). `ceil` porque a meta é atingida *durante*
+  o mês previsto.
+- N+1 controlado: 1 aggregate + 1 findMany para a taxa, depois
+  1 aggregate por meta — tudo via `Promise.all`, mesmo padrão das
+  6 queries paralelas de S12. `groupBy` não serve: o threshold
+  `date >= createdAt` varia por meta.
+- `list` retorna `[]` cedo quando o usuário não tem metas — sem
+  rodar as queries de progresso.
+- 9 testes unitários do `GoalsService.list` (lista vazia sem
+  queries de progresso; propaga `NotFoundException`; escopo por
+  `userId` + ordem desc + sem `userId` no payload; toda query de
+  progresso escopada a `userId` e `goal.createdAt`; sem histórico
+  → 0/0/null; meses com transações mas sem investimento → ritmo
+  zero → null; 0 contribuições mas ritmo positivo → previsão é
+  data, não null; meta em progresso → percentual + previsão; meta
+  atingida → percentual capado em 100 + previsão = última
+  contribuinte). Os 3 testes de `create` permanecem inalterados.
+- E2E de `GET /goals` atualizado: o teste "no progress fields"
+  de S13 virou "enriched with progress fields" (agora afirma
+  presença de `valorAcumulado`/`percentual`/`previsaoConclusao`
+  e ausência de `userId`); teste de isolamento ganhou mocks de
+  `transaction.aggregate`/`extrato.findMany`. Helper `stubAggregate`
+  roteia o aggregate da taxa (sem `_max`) vs. o de contribuições
+  (com `_max`).
+- Totais: 104 unit (10 suites, +5) + 46 E2E (1 todo, contagem
+  inalterada — testes de GET reescritos, não adicionados).
+  Cobertura: 100% statements/lines/functions, 89.65% branches
+  global. `goals.service.ts` em 90% branches — única linha
+  descoberta é a 32 (parameter-properties do construtor, artefato
+  conhecido do istanbul, documentado em S10–S13). Todo o código
+  novo de S14 está 100% coberto.
+- Lint dos arquivos novos limpo. `npm run build` passa sem erros.
+**Deviations from plan:** Refinamento da fórmula de previsão de
+OQ-1 (contínua → meses inteiros com `ceil`), documentado acima.
+O plano lista 4 testes unitários; entregues 9 (cobrindo os 4
+cenários exigidos + escopo/ownership + branches da taxa).
 
 ### S13 — POST/GET /goals (sem progresso)
 **Closed:** 2026-05-19

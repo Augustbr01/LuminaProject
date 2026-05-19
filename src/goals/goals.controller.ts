@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CreateGoalDto } from './dto/create-goal.dto';
-import { GoalDto, GoalsService } from './goals.service';
+import { GoalDto, GoalsService, GoalWithProgressDto } from './goals.service';
 
 @Controller('goals')
 export class GoalsController {
@@ -27,7 +27,7 @@ export class GoalsController {
   @Get()
   async list(
     @CurrentUser() currentUser: { clerkId: string },
-  ): Promise<{ data: GoalDto[] }> {
+  ): Promise<{ data: GoalWithProgressDto[] }> {
     const data = await this.goalsService.list(currentUser.clerkId);
     return { data };
   }
