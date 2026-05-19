@@ -13,7 +13,7 @@ jest.mock('@clerk/clerk-sdk-node', () => ({
     mockVerifyToken(...args),
 }));
 
-describe('Dashboard (e2e) — GET /dashboard/summary', () => {
+describe('Dashboard (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaMock;
 
@@ -261,5 +261,135 @@ describe('Dashboard (e2e) — GET /dashboard/summary', () => {
 
     expect(prisma.transaction.groupBy).not.toHaveBeenCalled();
     expect(prisma.transaction.aggregate).not.toHaveBeenCalled();
+  });
+
+  describe('GET /dashboard/history', () => {
+    const expectedMonths = (): string[] => {
+      const now = new Date();
+      const months: string[] = [];
+      let year = now.getUTCFullYear();
+      let month = now.getUTCMonth() + 1;
+      for (let i = 0; i < 6; i++) {
+        months.unshift(`${year}-${String(month).padStart(2, '0')}`);
+        month = month === 1 ? 12 : month - 1;
+        if (month === 12) year -= 1;
+      }
+      return months;
+    };
+
+    it('returns 401 when no Authorization header is sent', async () => {
+      await request(app.getHttpServer() as App)
+        .get('/dashboard/history')
+        .expect(401);
+
+      expect(prisma.transaction.aggregate).not.toHaveBeenCalled();
+    });
+
+    it('returns exactly 6 zeroed entries when no month has data', async () => {
+      mockVerifyToken.mockResolvedValue({ sub: clerkIdA });
+      prisma.user.findUnique.mockResolvedValue({ id: userIdA });
+      prisma.transaction.aggregate.mockResolvedValue({
+        _sum: { amount: null },
+      });
+
+      const response = await request(app.getHttpServer() as App)
+        .get('/dashboard/history')
+        .set('Authorization', 'Bearer token.user.a')
+        .expect(200);
+
+      const body = response.body as {
+        data: { history: Array<{ mesAno: string; totalGasto: number }> };
+      };
+      expect(body.data.history).toHaveLength(6);
+      expect(body.data.history.map((e) => e.mesAno)).toEqual(expectedMonths());
+      expect(body.data.history.every((e) => e.totalGasto === 0)).toBe(true);
+    });
+
+    it('returns 0 for months without data and totals for months with data, in ascending order', async () => {
+      const months = expectedMonths();
+      mockVerifyToken.mockResolvedValue({ sub: clerkIdA });
+      prisma.user.findUnique.mockResolvedValue({ id: userIdA });
+      prisma.transaction.aggregate.mockImplementation(
+        (args: { where: { extrato: { mesAno: string } } }) => {
+          if (args.where.extrato.mesAno === months[5])
+            return Promise.resolve({ _sum: { amount: '980.00' } });
+          if (args.where.extrato.mesAno === months[2])
+            return Promise.resolve({ _sum: { amount: '300.50' } });
+          return Promise.resolve({ _sum: { amount: null } });
+        },
+      );
+
+      const response = await request(app.getHttpServer() as App)
+        .get('/dashboard/history')
+        .set('Authorization', 'Bearer token.user.a')
+        .expect(200);
+
+      const body = response.body as {
+        data: { history: Array<{ mesAno: string; totalGasto: number }> };
+      };
+      expect(body.data.history).toHaveLength(6);
+      expect(body.data.history[5]).toEqual({
+        mesAno: months[5],
+        totalGasto: 980,
+      });
+      expect(body.data.history[2]).toEqual({
+        mesAno: months[2],
+        totalGasto: 300.5,
+      });
+      expect(body.data.history[0].totalGasto).toBe(0);
+    });
+
+    it('isolates history between two distinct users', async () => {
+      mockVerifyToken.mockImplementation((token: unknown) => {
+        if (token === 'token.user.a') return Promise.resolve({ sub: clerkIdA });
+        if (token === 'token.user.b') return Promise.resolve({ sub: clerkIdB });
+        return Promise.reject(new Error('unexpected token'));
+      });
+
+      prisma.user.findUnique.mockImplementation(
+        (args: { where: { clerkId: string } }) => {
+          if (args.where.clerkId === clerkIdA)
+            return Promise.resolve({ id: userIdA });
+          if (args.where.clerkId === clerkIdB)
+            return Promise.resolve({ id: userIdB });
+          return Promise.resolve(null);
+        },
+      );
+
+      prisma.transaction.aggregate.mockImplementation(
+        (args: { where: { extrato: { userId: string } } }) => {
+          if (args.where.extrato.userId === userIdA)
+            return Promise.resolve({ _sum: { amount: '500.00' } });
+          return Promise.resolve({ _sum: { amount: null } });
+        },
+      );
+
+      const responseA = await request(app.getHttpServer() as App)
+        .get('/dashboard/history')
+        .set('Authorization', 'Bearer token.user.a')
+        .expect(200);
+
+      const responseB = await request(app.getHttpServer() as App)
+        .get('/dashboard/history')
+        .set('Authorization', 'Bearer token.user.b')
+        .expect(200);
+
+      const bodyA = responseA.body as {
+        data: { history: Array<{ totalGasto: number }> };
+      };
+      const bodyB = responseB.body as {
+        data: { history: Array<{ totalGasto: number }> };
+      };
+      expect(bodyA.data.history.every((e) => e.totalGasto === 500)).toBe(true);
+      expect(bodyB.data.history.every((e) => e.totalGasto === 0)).toBe(true);
+
+      const aggregateCalls = prisma.transaction.aggregate.mock.calls as Array<
+        [{ where: { extrato: { userId: string } } }]
+      >;
+      const userIds = new Set(
+        aggregateCalls.map((c) => c[0].where.extrato.userId),
+      );
+      expect(userIds).toEqual(new Set([userIdA, userIdB]));
+    });
   });
 });

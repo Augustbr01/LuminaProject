@@ -1,6 +1,10 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { DashboardService, DashboardSummary } from './dashboard.service';
+import {
+  DashboardHistory,
+  DashboardService,
+  DashboardSummary,
+} from './dashboard.service';
 import { DashboardSummaryQueryDto } from './dto/dashboard-summary.query';
 
 @Controller('dashboard')
@@ -16,6 +20,14 @@ export class DashboardController {
       currentUser.clerkId,
       query,
     );
+    return { data };
+  }
+
+  @Get('history')
+  async history(
+    @CurrentUser() currentUser: { clerkId: string },
+  ): Promise<{ data: DashboardHistory }> {
+    const data = await this.dashboardService.history(currentUser.clerkId);
     return { data };
   }
 }
