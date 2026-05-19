@@ -14,7 +14,19 @@
       "Bash(powershell.exe -NoProfile -Command \"Get-Command qpdf -ErrorAction SilentlyContinue | Format-List Source, Version; Write-Output '---'; Get-ChildItem 'C:\\\\Program Files\\\\qpdf*','C:\\\\Program Files \\(x86\\)\\\\qpdf*' -ErrorAction SilentlyContinue | Select-Object FullName\")",
       "Bash(powershell.exe -NoProfile -Command \"Get-ChildItem 'C:\\\\Program Files\\\\qpdf 12.3.2' -Recurse -Filter qpdf.exe | Select-Object -ExpandProperty FullName\")",
       "Bash(git reset *)",
-      "Bash(git fetch *)"
+      "Bash(git fetch *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git merge *)",
+      "Bash(npx eslint *)",
+      "Bash(git commit -m '@ *)",
+      "Bash(git commit *)",
+      "Bash(rm /tmp/s13msg.txt)",
+      "PowerShell(npm test -- --silent 2>&1)",
+      "PowerShell(npm run test:e2e --silent 2>&1)",
+      "PowerShell(npx eslint src/goals/ 2>&1)",
+      "PowerShell(npm run build --silent 2>&1)",
+      "Bash(git stash *)"
     ]
   }
 }
