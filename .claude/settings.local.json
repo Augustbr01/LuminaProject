@@ -26,7 +26,10 @@
       "PowerShell(npm run test:e2e --silent 2>&1)",
       "PowerShell(npx eslint src/goals/ 2>&1)",
       "PowerShell(npm run build --silent 2>&1)",
-      "Bash(git stash *)"
+      "Bash(git stash *)",
+      "Bash(dir \"C:\\\\Users\\\\August\\\\Desktop\\\\LuminaProject\")",
+      "Bash(dir \"C:\\\\Users\\\\August\\\\Desktop\")",
+      "Bash(npx create-expo-app *)"
     ]
   }
 }

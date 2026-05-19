@@ -64,3 +64,4 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 .claude/settings.local.json
 .agents/
 .claude/
+.claude/settings.local.json
