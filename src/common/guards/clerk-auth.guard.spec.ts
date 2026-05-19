@@ -3,10 +3,11 @@ import { Reflector } from '@nestjs/core';
 import { ClerkAuthGuard } from './clerk-auth.guard';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
-const mockVerifyToken = jest.fn();
+const mockVerifyToken = jest.fn<Promise<{ sub: string }>, unknown[]>();
 
 jest.mock('@clerk/clerk-sdk-node', () => ({
-  verifyToken: (...args: unknown[]) => mockVerifyToken(...args),
+  verifyToken: (...args: unknown[]): Promise<{ sub: string }> =>
+    mockVerifyToken(...args),
 }));
 
 function buildContext(options: {
@@ -20,28 +21,21 @@ function buildContext(options: {
     user: undefined as unknown,
   };
 
-  const reflector = {
-    getAllAndOverride: jest.fn().mockReturnValue(options.isPublic ?? false),
-  };
-
   return {
     switchToHttp: () => ({ getRequest: () => request }),
     getHandler: () => ({}),
     getClass: () => ({}),
-    // reflector is injected separately — this context just carries handler/class
   } as unknown as ExecutionContext;
 }
 
 describe('ClerkAuthGuard', () => {
   let guard: ClerkAuthGuard;
-  let reflector: jest.Mocked<Reflector>;
+  let reflector: { getAllAndOverride: jest.Mock };
 
   beforeEach(() => {
-    reflector = {
-      getAllAndOverride: jest.fn(),
-    } as unknown as jest.Mocked<Reflector>;
+    reflector = { getAllAndOverride: jest.fn() };
 
-    guard = new ClerkAuthGuard(reflector);
+    guard = new ClerkAuthGuard(reflector as unknown as Reflector);
     mockVerifyToken.mockReset();
     process.env.CLERK_SECRET_KEY = 'test_secret_key';
   });

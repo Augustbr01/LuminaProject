@@ -1,8 +1,9 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { configureApp } from '../src/common/configure-app';
 import { PrismaService } from '../src/common/prisma/prisma.service';
 import { createPrismaMock, PrismaMock } from './mocks/prisma.mock';
 
@@ -35,7 +36,7 @@ describe('Goals (e2e)', () => {
       .compile();
 
     app = moduleRef.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ transform: true }));
+    configureApp(app);
     await app.init();
   });
 
@@ -61,8 +62,9 @@ describe('Goals (e2e)', () => {
       _max: { date: Date | null };
     },
   ): void => {
-    prisma.transaction.aggregate.mockImplementation((args: { _max?: unknown }) =>
-      Promise.resolve(args._max ? contributions : rate),
+    prisma.transaction.aggregate.mockImplementation(
+      (args: { _max?: unknown }) =>
+        Promise.resolve(args._max ? contributions : rate),
     );
   };
 

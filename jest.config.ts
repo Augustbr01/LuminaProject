@@ -21,6 +21,7 @@ const config: Config = {
     '!**/*.module.ts',
     '!**/*.spec.ts',
     '!**/main.ts',
+    '!**/configure-app.ts',
     '!**/*.controller.ts',
     '!**/dto/**',
     '!**/types/**',

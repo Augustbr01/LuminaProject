@@ -8,7 +8,7 @@ the implementation currently stands.
 
 ## ▶ Current Session
 
-**S15 — Hardening (validação, filter, logger)**
+**S16 — Deploy ready**
 
 > Read the full definition of this session in
 > `context/backend-development-plan.md` before starting.
@@ -34,7 +34,7 @@ the implementation currently stands.
 | S12 | GET /dashboard/history                   | ✅ Completed   |
 | S13 | POST/GET /goals (sem progresso)          | ✅ Completed   |
 | S14 | Cálculo de progresso e previsão          | ✅ Completed   |
-| S15 | Hardening (validação, filter, logger)    | ⬜ Not started |
+| S15 | Hardening (validação, filter, logger)    | ✅ Completed   |
 | S16 | Deploy ready                             | ⬜ Not started |
 
 Legend: ✅ Completed · 🔄 In progress · ⬜ Not started · ⬛ Blocked
@@ -95,6 +95,90 @@ telas correspondentes do mobile.
 
 Use this section to record decisions made during each session.
 Add a new entry when closing a session.
+
+### S15 — Hardening (validação, filter, logger)
+**Closed:** 2026-05-19
+**Decisions:**
+- `ValidationPipe` global passou a usar `{ whitelist: true,
+  forbidNonWhitelisted: true, transform: true }`. Antes (S6) era
+  só `transform: true`. `whitelist` remove campos não decorados;
+  `forbidNonWhitelisted` rejeita corpo com campos extras (400),
+  satisfazendo o critério "body com campos extras → 400".
+- Novo `HttpExceptionFilter` global (`@Catch()` sem args — pega
+  tudo) em `src/common/filters/`. Normaliza toda falha no envelope
+  `{ error, message, statusCode }` do `code-standards.md`.
+  - `error`: usa o campo `error` do response do `HttpException`
+    quando presente; senão deriva do status via `STATUS_LABELS`
+    (fallback `'Error'`).
+  - `message`: string direta, ou array do `ValidationPipe` unido
+    com `'; '`; fallback para o label do status.
+  - **`code` preservado**: quando a exceção carrega `code` (os
+    422 `PDF_ENCRYPTED`/`WRONG_PASSWORD` de S6), o filtro inclui
+    `code` no body — não quebra o contrato com o mobile.
+  - Não-`HttpException` → 500 genérico `{ error: 'Internal
+    Server Error', message: 'Internal server error', statusCode:
+    500 }`. Stacktrace e detalhe interno **só** vão para o log
+    do servidor, nunca para o cliente (critério "não vaza
+    stacktrace").
+- Logger: o filtro usa o `Logger` do Nest — `error` (com stack)
+  para status ≥ 500, `warn` para 4xx. Loga apenas
+  `método + url + status + message` — sem tokens, sem corpo de
+  request, sem conteúdo de PDF.
+- Helper `configureApp(app)` em `src/common/configure-app.ts`
+  aplica pipe + filtro num só lugar; chamado por `main.ts` **e**
+  por todos os specs E2E. Garante que o E2E exercita exatamente
+  o mesmo pipeline da produção (antes cada spec replicava só o
+  `ValidationPipe` à mão). Excluído da cobertura
+  (`collectCoverageFrom`) como glue de bootstrap, igual a
+  `main.ts`.
+- `GET /health` (`@Public()`) em `HealthModule`/`HealthController`
+  para a probe do Render — responde `{ status: 'ok' }` sem
+  envelope `{ data }` (probe de infraestrutura, não recurso de
+  domínio; o Render só checa o 200). `HealthModule` não tem
+  service: o endpoint não tem regra de negócio.
+- **Índices: nenhum criado.** O plano de S15 e `architecture.md`
+  ("Estratégia de Índices") mandam validar com `EXPLAIN` sobre
+  volume real antes de adicionar — "não adicionar
+  profilaticamente". O banco de dev não tem volume; criar
+  índices agora seria especulativo. A seção de `architecture.md`
+  permanece como plano para quando houver dados.
+- Limpeza do baseline de lint (13 erros pré-existentes em
+  arquivos de teste, prometida em S8 para "S15 junto com o
+  hardening"): `clerk-auth.guard.spec.ts` (mock tipado +
+  `reflector` como `{ getAllAndOverride: jest.Mock }` + remoção
+  de var não usada), `prisma.service.spec.ts` (captura dos
+  spies em vez de referenciar métodos unbound),
+  `extratos.e2e-spec.ts` (import estático de `IaApiError` no
+  lugar do `await import`; spreads de `.mock.calls` cast para
+  `unknown[]`), `goals.e2e-spec.ts` (wrap de prettier). Zero
+  alteração de comportamento de teste.
+- 10 testes unitários do `HttpExceptionFilter` (400 com array de
+  mensagens; 401/403/404/409; 422 com `code` preservado;
+  `HttpException` com response string; payload sem `message` →
+  fallback de label; não-`HttpException` → 500 com stack logado;
+  valor não-`Error` lançado → 500 sem stack). Filtro em 100%
+  de cobertura.
+- E2E: `test/app.e2e-spec.ts` deixou de ser placeholder — agora
+  cobre `GET /health` (200 sem token), e o envelope padrão para
+  401, 400 (campo extra → mensagem cita o campo), 404 e 500
+  (sem stacktrace no body). O 409 no formato padrão é afirmado
+  no teste de duplicidade já existente de `extratos.e2e-spec.ts`.
+  403 não tem endpoint que o produza — coberto no teste unitário
+  do filtro.
+- Totais: 114 unit (11 suites, +10) + 51 E2E (6 suites, +5).
+  Cobertura: 100% statements/lines/functions, 91.01% branches
+  global.
+- `npm run build` passa. `npm run lint` agora limpo no projeto
+  inteiro (0 erros) — o baseline de 13 foi zerado.
+**Deviations from plan:**
+1. `HealthModule` sem service — o endpoint não tem regra de
+   negócio (convenção "Controller + Service + Module" do
+   `code-standards.md` flexibilizada para um endpoint de infra).
+2. Limpeza do baseline de lint não está nos entregáveis literais
+   de S15, mas foi explicitamente diferida para cá pela decisão
+   registrada em S8. Tratada como parte do "hardening".
+3. Nenhum índice criado — é o que o próprio plano manda (validar
+   com `EXPLAIN` antes; sem volume de dados em dev).
 
 ### S14 — Cálculo de progresso e previsão
 **Closed:** 2026-05-19

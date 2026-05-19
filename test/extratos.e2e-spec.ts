@@ -1,8 +1,9 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { configureApp } from '../src/common/configure-app';
 import { PrismaService } from '../src/common/prisma/prisma.service';
 import {
   PdfDecryptionService,
@@ -10,6 +11,7 @@ import {
   PdfWrongPasswordError,
 } from '../src/extratos/pdf-decryption.service';
 import { IaService } from '../src/ia/ia.service';
+import { IaApiError } from '../src/ia/types/ia-errors';
 import { createPrismaMock, PrismaMock } from './mocks/prisma.mock';
 
 const mockVerifyToken = jest.fn<Promise<{ sub: string }>, unknown[]>();
@@ -47,7 +49,7 @@ describe('Extratos (e2e) — POST /extratos and GET /extratos', () => {
       .compile();
 
     app = moduleRef.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ transform: true }));
+    configureApp(app);
     await app.init();
   });
 
@@ -167,7 +169,7 @@ describe('Extratos (e2e) — POST /extratos and GET /extratos', () => {
     pdfDecryption.ensureDecrypted.mockResolvedValue(validPdf);
     prisma.extrato.findUnique.mockResolvedValue({ id: 'existing-id' });
 
-    await authedRequest()
+    const response = await authedRequest()
       .field('banco', 'nubank')
       .field('mesAno', '2026-04')
       .attach('file', validPdf, {
@@ -176,11 +178,15 @@ describe('Extratos (e2e) — POST /extratos and GET /extratos', () => {
       })
       .expect(409);
 
+    expect(response.body).toEqual({
+      error: 'Conflict',
+      message: 'Extrato já existe para este banco e mês',
+      statusCode: 409,
+    });
     expect(iaService.extractTransactions).not.toHaveBeenCalled();
   });
 
   it('returns 502 when the IA call fails (extrato is not persisted)', async () => {
-    const { IaApiError } = await import('../src/ia/types/ia-errors');
     pdfDecryption.ensureDecrypted.mockResolvedValue(validPdf);
     prisma.extrato.findUnique.mockResolvedValue(null);
     iaService.extractTransactions.mockRejectedValue(
@@ -277,11 +283,11 @@ describe('Extratos (e2e) — POST /extratos and GET /extratos', () => {
     // Invariant 1 (PDF never lands in durable storage). The pdf bytes
     // are never passed to any prisma write — only the structured
     // extraction is. Walk every prisma model write call and assert.
-    const allWriteCalls = [
-      ...prisma.extrato.create.mock.calls,
-      ...prisma.extrato.createMany.mock.calls,
-      ...prisma.transaction.create.mock.calls,
-      ...prisma.transaction.createMany.mock.calls,
+    const allWriteCalls: unknown[] = [
+      ...(prisma.extrato.create.mock.calls as unknown[]),
+      ...(prisma.extrato.createMany.mock.calls as unknown[]),
+      ...(prisma.transaction.create.mock.calls as unknown[]),
+      ...(prisma.transaction.createMany.mock.calls as unknown[]),
     ];
     for (const call of allWriteCalls) {
       const serialized = JSON.stringify(call);
