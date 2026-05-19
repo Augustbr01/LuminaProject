@@ -8,7 +8,7 @@ the implementation currently stands.
 
 ## ▶ Current Session
 
-**S13 — POST/GET /goals (sem progresso)**
+**S14 — Cálculo de progresso e previsão**
 
 > Read the full definition of this session in
 > `context/backend-development-plan.md` before starting.
@@ -32,7 +32,7 @@ the implementation currently stands.
 | S10 | PATCH /transactions/:id                  | ✅ Completed   |
 | S11 | GET /dashboard/summary                   | ✅ Completed   |
 | S12 | GET /dashboard/history                   | ✅ Completed   |
-| S13 | POST/GET /goals (sem progresso)          | ⬜ Not started |
+| S13 | POST/GET /goals (sem progresso)          | ✅ Completed   |
 | S14 | Cálculo de progresso e previsão          | ⬜ Not started |
 | S15 | Hardening (validação, filter, logger)    | ⬜ Not started |
 | S16 | Deploy ready                             | ⬜ Not started |
@@ -95,6 +95,76 @@ telas correspondentes do mobile.
 
 Use this section to record decisions made during each session.
 Add a new entry when closing a session.
+
+### S13 — POST/GET /goals (sem progresso)
+**Closed:** 2026-05-19
+**Decisions:**
+- Novo módulo `goals/` (controller, service, module, DTO) —
+  fronteira própria conforme `code-standards.md`. `GoalsModule`
+  importa apenas `UsersModule` (para `resolveUserId`); o
+  `PrismaService` vem do `PrismaModule` global. Registrado em
+  `AppModule`. Dependência só de S4, conforme o plano.
+- `CreateGoalDto` valida os três campos via `class-validator`:
+  `name` (`@IsString` + `@IsNotEmpty`), `targetAmount`
+  (`@IsNumber` + `@IsPositive` — rejeita 0 e negativos) e
+  `deadline` (`@Type(() => Date)` + `@IsDate` + `@MinDate(() =>
+  new Date())`). `@MinDate` com função garante "data futura"
+  avaliada no momento da request; `@Type` transforma a string
+  ISO em `Date` (o `ValidationPipe` global usa `transform: true`).
+  String de data inválida vira `Invalid Date` e cai no `@IsDate`.
+- `GoalsService.create(clerkId, dto)` resolve `userId` via
+  `usersService.resolveUserId` (invariante 3 — `userId` nunca
+  vem do request) e faz um único `prisma.goal.create`. Sem
+  regra de unicidade: o usuário pode ter várias metas (o plano
+  não define constraint, e `Goal` não tem `@@unique`).
+- `GoalsService.list(clerkId)` resolve `userId` e faz
+  `prisma.goal.findMany` com `where: { userId }`, `orderBy:
+  { createdAt: 'desc' }`. Ownership sempre no `where` — nenhuma
+  meta de outro usuário retorna em nenhum caminho.
+- Ambos os métodos usam `select` explícito
+  `{ id, name, targetAmount, deadline, createdAt }` — sem
+  `userId` no payload (mesma decisão de S8: não é sensível,
+  mas é redundante e evita acoplar a chave interna ao cliente).
+  Sem campo `progresso`/`valorAcumulado`/`percentual` — esses
+  entram só em S14.
+- Mapper `toDto` converte `targetAmount` (Decimal do Prisma)
+  via `Number()` — mesma convenção do Dashboard (S11/S12) para
+  Decimais; entrega JSON numérico ao mobile em vez de string.
+- Controller: `@Post()` com `@HttpCode(HttpStatus.CREATED)`
+  explícito (mesmo padrão do `POST /extratos` de S7) e `@Get()`.
+  Ambos devolvem `{ data }` no envelope padrão do
+  `code-standards.md`.
+- 7 testes unitários do `GoalsService` (`create`: persiste com
+  `userId` resolvido / nunca do request, converte Decimal →
+  number, propaga `NotFoundException`; `list`: scoped por
+  `userId` + ordem desc, sem `userId` no payload + Decimal →
+  number, lista vazia, propaga `NotFoundException`).
+- 9 testes unitários do `CreateGoalDto` via `plainToInstance` +
+  `validate` (payload válido; name vazio/ausente; `targetAmount`
+  0/negativo/não-numérico; `deadline` no passado/inválido;
+  `deadline` futuro válido). Spec importa `reflect-metadata`
+  explicitamente — o `@Type` do `class-transformer` precisa do
+  polyfill, que os specs com `@nestjs/testing` recebem
+  transitivamente mas um spec puro de DTO não.
+- 8 testes E2E novos em `test/goals.e2e-spec.ts`: `POST` —
+  401 sem token, 201 com `userId` resolvido do token,
+  400 deadline no passado, 400 `targetAmount` 0/negativo,
+  400 name vazio; `GET` — 401 sem token, lista só as metas
+  do usuário (sem campos de progresso, sem `userId`),
+  isolamento entre dois usuários (cada `findMany` carrega o
+  `userId` correto resolvido do token).
+- Totais: 99 unit (10 suites, +16) + 46 E2E passados (+8,
+  1 todo). Cobertura: 100% statements/lines/functions,
+  88.72% branches global. `goals.service.ts` em 75% branches
+  pelo artefato conhecido do istanbul instrumentando
+  parameter-properties do construtor (linha 26 — mesma causa
+  documentada em S10/S11/S12). Todo o código novo de S13 está
+  100% coberto.
+- Lint dos arquivos novos limpo. `npm run build` passa sem erros.
+**Deviations from plan:** Nenhuma. O plano lista a validação
+de DTO como teste "unitário" — entregue como spec dedicado do
+`CreateGoalDto` (`plainToInstance` + `validate`), além dos 400
+correspondentes no E2E.
 
 ### S12 — GET /dashboard/history
 **Closed:** 2026-05-19
